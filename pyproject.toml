@@ -1,0 +1,10 @@
+[project]
+name = "tera"
+version = "0.1.0"
+requires-python = ">=3.9"
+dependencies = [
+    "ipykernel>=6.31.0",
+    "pydantic>=2.13.5",
+    "pymupdf>=1.26.5",
+    "requests>=2.32.5",
+]
