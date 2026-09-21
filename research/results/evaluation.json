@@ -1,0 +1,228 @@
+{
+  "run": {
+    "completed_at_utc": "2026-09-21T17:16:56.621446+00:00",
+    "models": [
+      "gemma3:12b",
+      "qwen3:14b",
+      "qwen3.5:9b"
+    ],
+    "temperature": 0,
+    "context_tokens": 8192,
+    "prompt_sha256": "40450507d9742682df2c7396cef2273d81daf7838657f5bfa8d712e7500be709",
+    "template_sha256": "abe695e2576367fce2d2ae029ccb2ff855f1d34bcd14eaf7062a21495d94b33a",
+    "documents_sha256": {
+      "hotel_invoice.pdf": "fade0c272137fefbe0b7d45e67d019f122c43faa653bfa4ccf06f2d22f9efd93",
+      "hotel_invoice_zh.pdf": "424e22df7331bdb0ce4de9a56b64402f1ec95a906dcf854901c80ab375a783b7"
+    }
+  },
+  "extraction": [
+    {
+      "model": "gemma3:12b",
+      "document": "hotel_invoice.pdf",
+      "data": {
+        "hotel_name": "NORTHSTAR HOTEL BERLIN",
+        "hotel_address": "Alexanderplatz 99, 10178 Berlin, Germany",
+        "invoice_number": "NSB-2026-0914-1042",
+        "invoice_date": "2026-09-14",
+        "guest_name": "Alex Morgan",
+        "check_in_date": "2026-09-10",
+        "check_out_date": "2026-09-14",
+        "number_of_nights": 4,
+        "currency": "EUR",
+        "room_rate": 140.0,
+        "city_tax": 42.0,
+        "total_amount": 712.6,
+        "payment_method": "Visa ending 4242",
+        "breakfast_amount": 60.0
+      },
+      "raw_output": "{\n  \"hotel_name\": \"NORTHSTAR HOTEL BERLIN\",\n  \"hotel_address\": \"Alexanderplatz 99, 10178 Berlin, Germany\",\n  \"invoice_number\": \"NSB-2026-0914-1042\",\n  \"invoice_date\": \"2026-09-14\",\n  \"guest_name\": \"Alex Morgan\",\n  \"check_in_date\": \"2026-09-10\",\n  \"check_out_date\": \"2026-09-14\",\n  \"number_of_nights\": 4,\n  \"currency\": \"EUR\",\n  \"room_rate\": 140.00,\n  \"city_tax\": 42.00,\n  \"total_amount\": 712.60,\n  \"payment_method\": \"Visa ending 4242\",\n  \"breakfast_amount\": 60.00\n}",
+      "seconds": 18.643921000000773,
+      "error": null
+    },
+    {
+      "model": "gemma3:12b",
+      "document": "hotel_invoice_zh.pdf",
+      "data": {
+        "hotel_name": "上海晨星酒店",
+        "hotel_address": "上海市浦东新区示例路88号",
+        "invoice_number": "CX-2026-0918-2048",
+        "invoice_date": "2026-09-18",
+        "guest_name": "李明",
+        "check_in_date": "2026-09-15",
+        "check_out_date": "2026-09-18",
+        "number_of_nights": 3,
+        "currency": "CNY",
+        "room_rate": 680.0,
+        "city_tax": 0.0,
+        "total_amount": 2220.0,
+        "payment_method": "支付宝",
+        "breakfast_amount": 180.0
+      },
+      "raw_output": "{\n  \"hotel_name\": \"上海晨星酒店\",\n  \"hotel_address\": \"上海市浦东新区示例路88号\",\n  \"invoice_number\": \"CX-2026-0918-2048\",\n  \"invoice_date\": \"2026-09-18\",\n  \"guest_name\": \"李明\",\n  \"check_in_date\": \"2026-09-15\",\n  \"check_out_date\": \"2026-09-18\",\n  \"number_of_nights\": 3,\n  \"currency\": \"CNY\",\n  \"room_rate\": 680.00,\n  \"city_tax\": 0.00,\n  \"total_amount\": 2220.00,\n  \"payment_method\": \"支付宝\",\n  \"breakfast_amount\": 180.00\n}",
+      "seconds": 10.485855291000007,
+      "error": null
+    },
+    {
+      "model": "qwen3:14b",
+      "document": "hotel_invoice.pdf",
+      "data": {
+        "hotel_name": "NORTHSTAR HOTEL BERLIN",
+        "hotel_address": "Alexanderplatz 99, 10178 Berlin, Germany",
+        "invoice_number": "NSB-2026-0914-1042",
+        "invoice_date": "2026-09-14",
+        "guest_name": "Alex Morgan",
+        "check_in_date": "2026-09-10",
+        "check_out_date": "2026-09-14",
+        "number_of_nights": 4,
+        "currency": "EUR",
+        "room_rate": 140.0,
+        "city_tax": 42.0,
+        "total_amount": 712.6,
+        "payment_method": "Visa ending 4242",
+        "breakfast_amount": 60.0
+      },
+      "raw_output": "{\n  \"hotel_name\": \"NORTHSTAR HOTEL BERLIN\",\n  \"hotel_address\": \"Alexanderplatz 99, 10178 Berlin, Germany\",\n  \"invoice_number\": \"NSB-2026-0914-1042\",\n  \"invoice_date\": \"2026-09-14\",\n  \"guest_name\": \"Alex Morgan\",\n  \"check_in_date\": \"2026-09-10\",\n  \"check_out_date\": \"2026-09-14\",\n  \"number_of_nights\": 4,\n  \"currency\": \"EUR\",\n  \"room_rate\": 140.00,\n  \"city_tax\": 42.00,\n  \"total_amount\": 712.60,\n  \"payment_method\": \"Visa ending 4242\",\n  \"breakfast_amount\": 60.00\n}",
+      "seconds": 13.49361033399964,
+      "error": null
+    },
+    {
+      "model": "qwen3:14b",
+      "document": "hotel_invoice_zh.pdf",
+      "data": {
+        "hotel_name": "上海晨星酒店",
+        "hotel_address": "上海市浦东新区示例路88号",
+        "invoice_number": "CX-2026-0918-2048",
+        "invoice_date": "2026-09-18",
+        "guest_name": "李明",
+        "check_in_date": "2026-09-15",
+        "check_out_date": "2026-09-18",
+        "number_of_nights": 3,
+        "currency": "CNY",
+        "room_rate": 680.0,
+        "city_tax": 0.0,
+        "total_amount": 2220.0,
+        "payment_method": "支付宝",
+        "breakfast_amount": 180.0
+      },
+      "raw_output": "{\n  \"hotel_name\": \"上海晨星酒店\",\n  \"hotel_address\": \"上海市浦东新区示例路88号\",\n  \"invoice_number\": \"CX-2026-0918-2048\",\n  \"invoice_date\": \"2026-09-18\",\n  \"guest_name\": \"李明\",\n  \"check_in_date\": \"2026-09-15\",\n  \"check_out_date\": \"2026-09-18\",\n  \"number_of_nights\": 3,\n  \"currency\": \"CNY\",\n  \"room_rate\": 680.00,\n  \"city_tax\": 0.00,\n  \"total_amount\": 2220.00,\n  \"payment_method\": \"支付宝\",\n  \"breakfast_amount\": 180.00\n}",
+      "seconds": 8.923425124999994,
+      "error": null
+    },
+    {
+      "model": "qwen3.5:9b",
+      "document": "hotel_invoice.pdf",
+      "data": {
+        "hotel_name": "NORTHSTAR HOTEL BERLIN",
+        "hotel_address": "Alexanderplatz 99\n10178 Berlin, Germany",
+        "invoice_number": "NSB-2026-0914-1042",
+        "invoice_date": "2026-09-14",
+        "guest_name": "Alex Morgan",
+        "check_in_date": "2026-09-10",
+        "check_out_date": "2026-09-14",
+        "number_of_nights": 4,
+        "currency": "EUR",
+        "room_rate": 140.0,
+        "city_tax": 42.0,
+        "total_amount": 712.6,
+        "payment_method": "Visa ending 4242",
+        "breakfast_amount": 60.0
+      },
+      "raw_output": "{\n  \"hotel_name\": \"NORTHSTAR HOTEL BERLIN\",\n  \"hotel_address\": \"Alexanderplatz 99\\n10178 Berlin, Germany\",\n  \"invoice_number\": \"NSB-2026-0914-1042\",\n  \"invoice_date\": \"2026-09-14\",\n  \"guest_name\": \"Alex Morgan\",\n  \"check_in_date\": \"2026-09-10\",\n  \"check_out_date\": \"2026-09-14\",\n  \"number_of_nights\": 4,\n  \"currency\": \"EUR\",\n  \"room_rate\": 140.0,\n  \"city_tax\": 42.0,\n  \"total_amount\": 712.6,\n  \"payment_method\": \"Visa ending 4242\",\n  \"breakfast_amount\": 60.0\n}",
+      "seconds": 11.232608874999642,
+      "error": null
+    },
+    {
+      "model": "qwen3.5:9b",
+      "document": "hotel_invoice_zh.pdf",
+      "data": {
+        "hotel_name": "上海晨星酒店",
+        "hotel_address": "上海市浦东新区示例路88号",
+        "invoice_number": "CX-2026-0918-2048",
+        "invoice_date": "2026-09-18",
+        "guest_name": "李明",
+        "check_in_date": "2026-09-15",
+        "check_out_date": "2026-09-18",
+        "number_of_nights": 3,
+        "currency": "CNY",
+        "room_rate": 680.0,
+        "city_tax": 0.0,
+        "total_amount": 2220.0,
+        "payment_method": "支付宝",
+        "breakfast_amount": 180.0
+      },
+      "raw_output": "{\n  \"hotel_name\": \"上海晨星酒店\",\n  \"hotel_address\": \"上海市浦东新区示例路88号\",\n  \"invoice_number\": \"CX-2026-0918-2048\",\n  \"invoice_date\": \"2026-09-18\",\n  \"guest_name\": \"李明\",\n  \"check_in_date\": \"2026-09-15\",\n  \"check_out_date\": \"2026-09-18\",\n  \"number_of_nights\": 3,\n  \"currency\": \"CNY\",\n  \"room_rate\": 680.00,\n  \"city_tax\": 0.00,\n  \"total_amount\": 2220.00,\n  \"payment_method\": \"支付宝\",\n  \"breakfast_amount\": 180.00\n}",
+      "seconds": 6.072975000000042,
+      "error": null
+    }
+  ],
+  "evaluation": [
+    {
+      "model": "gemma3:12b",
+      "document": "hotel_invoice.pdf",
+      "correct_fields": 13,
+      "total_fields": 14,
+      "accuracy": 0.9285714285714286,
+      "seconds": 18.64,
+      "error": null
+    },
+    {
+      "model": "gemma3:12b",
+      "document": "hotel_invoice_zh.pdf",
+      "correct_fields": 14,
+      "total_fields": 14,
+      "accuracy": 1.0,
+      "seconds": 10.49,
+      "error": null
+    },
+    {
+      "model": "qwen3:14b",
+      "document": "hotel_invoice.pdf",
+      "correct_fields": 13,
+      "total_fields": 14,
+      "accuracy": 0.9285714285714286,
+      "seconds": 13.49,
+      "error": null
+    },
+    {
+      "model": "qwen3:14b",
+      "document": "hotel_invoice_zh.pdf",
+      "correct_fields": 14,
+      "total_fields": 14,
+      "accuracy": 1.0,
+      "seconds": 8.92,
+      "error": null
+    },
+    {
+      "model": "qwen3.5:9b",
+      "document": "hotel_invoice.pdf",
+      "correct_fields": 12,
+      "total_fields": 14,
+      "accuracy": 0.8571428571428571,
+      "seconds": 11.23,
+      "error": null
+    },
+    {
+      "model": "qwen3.5:9b",
+      "document": "hotel_invoice_zh.pdf",
+      "correct_fields": 14,
+      "total_fields": 14,
+      "accuracy": 1.0,
+      "seconds": 6.07,
+      "error": null
+    }
+  ],
+  "summaries": {
+    "gemma3:12b": {
+      "path": "summary_gemma3_12b_de.md",
+      "error": null
+    },
+    "qwen3:14b": {
+      "path": "summary_qwen3_14b_de.md",
+      "error": null
+    },
+    "qwen3.5:9b": {
+      "path": "summary_qwen3.5_9b_de.md",
+      "error": null
+    }
+  }
+}
