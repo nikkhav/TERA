@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #20231f;
+  --color-moss-50: #f2f6ee;
+  --color-moss-100: #e3ecdc;
+  --color-moss-500: #688458;
+  --color-moss-600: #567247;
+  --color-moss-700: #435c38;
+  --color-sand: #f5f1e8;
+  --color-line: #e4e6df;
+  --shadow-soft:
+    0 1px 2px rgb(25 32 21 / 0.04), 0 14px 34px rgb(25 32 21 / 0.06);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: #f7f8f4;
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "tnum" 1;
+  }
+  button,
+  input {
+    font: inherit;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  ::selection {
+    background: #dce9d4;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-white shadow-soft;
+  }
+  .field {
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm outline-none transition placeholder:text-zinc-400 focus:border-moss-500 focus:ring-3 focus:ring-moss-100;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold tracking-wide text-zinc-600;
+  }
+  .focus-ring {
+    @apply outline-none focus-visible:ring-3 focus-visible:ring-moss-100;
+  }
+}

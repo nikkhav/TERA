@@ -1,10 +1,12 @@
 """Merge fragments conservatively; calculate and render reports without an LLM."""
 
 from collections import defaultdict
+from copy import deepcopy
 from decimal import Decimal
-from html import escape
 
-from tera.schemas import Category, ReceiptFacts
+from tera.labels import FIELD_LABELS
+from tera.reconciliation import reconcile
+from tera.schemas import Category, ReceiptFacts, ValidationIssue
 
 CATEGORIES = [item.value for item in Category]
 
@@ -12,7 +14,7 @@ CATEGORIES = [item.value for item in Category]
 def merge_fragments(document, fragments, errors, chunks):
     values, warnings = {}, list(errors)
     for field in ReceiptFacts.model_fields:
-        if field in {"evidence", "notes", "multiple_receipts"}:
+        if field in {"evidence", "notes", "notices", "multiple_receipts", "items"}:
             continue
         unique = []
         for fragment in fragments:
@@ -21,38 +23,57 @@ def merge_fragments(document, fragments, errors, chunks):
                 unique.append(value)
         values[field] = unique[0] if len(unique) == 1 else None
         if len(unique) > 1:
-            warnings.append(f"Widersprüchliche Werte für {field}; manuelle Prüfung erforderlich.")
+            warnings.append(
+                f"Widersprüchliche Werte für {FIELD_LABELS.get(field, 'Belegangaben')}; manuelle Prüfung erforderlich."
+            )
+    items, anchors = [], {}
     for fragment in fragments:
         warnings.extend(fragment.notes)
-    if any(f.multiple_receipts for f in fragments):
-        warnings.append("Mehrere Belege in einer PDF; bitte getrennte PDFs verwenden.")
-    if any(part["part"] > 1 for chunk in chunks for part in chunk):
-        warnings.append("Lange Seite aufgeteilt; Zusammenführung der Textfragmente prüfen.")
-    for field in ("merchant", "invoice_date", "category", "currency", "total"):
-        if values[field] is None:
-            warnings.append(f"Fehlende oder unklare Angabe: {field}.")
-    start, end = values["service_start"], values["service_end"]
-    if start and end and start > end:
-        warnings.append("Leistungszeitraum ist widersprüchlich.")
-    total, breakfast = values["total"], values["breakfast_total"]
-    if (
-        total is not None
-        and breakfast is not None
-        and (abs(breakfast) > abs(total) or breakfast * total < 0)
-    ):
-        warnings.append("Frühstücksbetrag ist nicht mit dem Gesamtbetrag vereinbar.")
-        values["breakfast_total"] = None
-    facts = ReceiptFacts(**values)
+        for item in fragment.items:
+            anchor = tuple(sorted((e.page, " ".join(e.quote.split())) for e in item.evidence))
+            if anchor and anchor in anchors:
+                prior = anchors[anchor]
+                if item.model_dump(exclude={"evidence"}) != prior.model_dump(exclude={"evidence"}):
+                    warnings.append("Widersprüchliche Positionen mit identischem Textbeleg.")
+                continue
+            items.append(item)
+            if anchor:
+                anchors[anchor] = item
+    facts = ReceiptFacts(
+        **values,
+        items=items,
+        multiple_receipts=any(f.multiple_receipts for f in fragments),
+        evidence=[e for f in fragments for e in f.evidence],
+    )
+    facts, issues, derived, items_reconciled = reconcile(facts)
+    pages = sorted({p["page"] for chunk in chunks for p in chunk})
+    issues.extend(
+        ValidationIssue(code="extraction_review", message=w, pages=pages) for w in warnings
+    )
     return {
         "document_id": document.id,
         "filename": document.filename,
         "sha256": document.sha256,
         "page_count": document.page_count,
-        "facts": facts.model_dump(mode="json", exclude={"notes", "evidence", "multiple_receipts"}),
-        "sources": [
-            dict(document_id=document.id, **e.model_dump()) for f in fragments for e in f.evidence
+        "facts": facts.model_dump(
+            mode="json", exclude={"notes", "notices", "evidence", "multiple_receipts"}
+        ),
+        "sources": [dict(document_id=document.id, **e.model_dump()) for e in facts.evidence]
+        + [
+            dict(
+                document_id=document.id,
+                **dict(e.model_dump(), field=f"items.{i}.{e.field or 'description'}"),
+            )
+            for i, item in enumerate(facts.items)
+            for e in item.evidence
         ],
-        "warnings": list(dict.fromkeys(warnings)),
+        "warnings": list(dict.fromkeys(issue.message for issue in issues)),
+        "notices": list(dict.fromkeys(note for fragment in fragments for note in fragment.notices)),
+        "validation_issues": [issue.model_dump() for issue in issues],
+        "derived_fields": derived,
+        "items_reconciled": items_reconciled,
+        "recheck_attempted": False,
+        "initial_issues": [],
         "extraction_failed": bool(errors),
     }
 
@@ -78,6 +99,7 @@ def mark_duplicates(records):
 
 
 def make_report(records, model, prompt_version):
+    records = deepcopy(records)
     mark_duplicates(records)
     expenses, accommodation, warnings = [], [], []
     for record in records:
@@ -85,7 +107,14 @@ def make_report(records, model, prompt_version):
         total = Decimal(f["total"]) if f["total"] is not None else None
         breakfast = Decimal(f["breakfast_total"]) if f["breakfast_total"] is not None else None
         category = f["category"] or "Sonstige Ausgaben"
-        record["status"] = "needs_review" if record["warnings"] else "extracted"
+        decision = (record.get("review_history") or [{}])[-1].get("decision")
+        record["status"] = (
+            decision
+            if decision in {"approved", "rejected"}
+            else "needs_review"
+            if record["warnings"]
+            else "extracted"
+        )
         base = {
             "document_id": record["document_id"],
             "filename": record["filename"],
@@ -97,7 +126,18 @@ def make_report(records, model, prompt_version):
             "status": record["status"],
             "pages": sorted({source["page"] for source in record["sources"]}),
         }
-        if category == "Hotel" and total is not None and breakfast is not None:
+        if record.get("items_reconciled"):
+            expenses.extend(
+                dict(
+                    base,
+                    category=item["category"],
+                    description=item["description"],
+                    amount=item["gross"],
+                    pages=sorted({e["page"] for e in item["evidence"]}),
+                )
+                for item in f["items"]
+            )
+        elif category == "Hotel" and total is not None and breakfast is not None:
             expenses.extend(
                 [
                     dict(
@@ -131,10 +171,15 @@ def make_report(records, model, prompt_version):
                     else None,
                 )
             )
-        warnings.extend(
-            {"document_id": record["document_id"], "message": message}
-            for message in record["warnings"]
-        )
+        if record["status"] == "needs_review":
+            warnings.extend(
+                {
+                    "document_id": record["document_id"],
+                    "filename": record["filename"],
+                    "message": message,
+                }
+                for message in dict.fromkeys(record["warnings"])
+            )
     expenses.sort(
         key=lambda e: (e["date"] or "9999", e["document_id"], CATEGORIES.index(e["category"]))
     )
@@ -149,13 +194,20 @@ def make_report(records, model, prompt_version):
                     **dict(zip(keys, key)),
                     "confirmed": Decimal(0),
                     "in_review": Decimal(0),
+                    "excluded": Decimal(0),
                     "unknown_amounts": 0,
                 },
             )
             if expense["amount"] is None:
                 group["unknown_amounts"] += 1
             else:
-                target = "confirmed" if expense["status"] == "extracted" else "in_review"
+                target = (
+                    "excluded"
+                    if expense["status"] == "rejected"
+                    else "confirmed"
+                    if expense["status"] in {"extracted", "approved"}
+                    else "in_review"
+                )
                 group[target] += Decimal(expense["amount"])
         return [
             {k: str(v) if isinstance(v, Decimal) else v for k, v in group.items()}
@@ -177,13 +229,14 @@ def make_report(records, model, prompt_version):
                         "category": category,
                         "confirmed": "0",
                         "in_review": "0",
+                        "excluded": "0",
                         "unknown_amounts": 0,
                     }
                 )
     by_category.sort(key=lambda g: (g["currency"] or "~", CATEGORIES.index(g["category"])))
     failed = sum(record["extraction_failed"] for record in records)
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
         "language": "de",
         "model": model,
         "prompt_version": prompt_version,
@@ -191,7 +244,7 @@ def make_report(records, model, prompt_version):
             "supplied": len(records),
             "processed": len(records) - failed,
             "failed": failed,
-            "needs_review": sum(bool(r["warnings"]) for r in records),
+            "needs_review": sum(r["status"] == "needs_review" for r in records),
         },
         "documents": records,
         "expenses": expenses,
@@ -202,133 +255,14 @@ def make_report(records, model, prompt_version):
             "by_currency": by_currency,
         },
         "warnings": warnings,
+        "notices": [
+            {
+                "document_id": record["document_id"],
+                "filename": record["filename"],
+                "message": message,
+            }
+            for record in records
+            for message in record.get("notices", [])
+        ],
     }
-    report["markdown"] = render_markdown(report)
     return report
-
-
-def cell(value):
-    if value is None:
-        return "Unbekannt"
-    # Keep PDF/model content as text, not HTML, links, or new Markdown rows.
-    value = escape(str(value), quote=False).replace("\n", " ").replace("\r", " ")
-    for character in ("\\", "|", "[", "]", "*", "_", "`", "#"):
-        value = value.replace(character, "\\" + character)
-    return value
-
-
-def money(value):
-    return "Unbekannt" if value is None else format(Decimal(value), "f").replace(".", ",")
-
-
-def render_markdown(report):
-    lines = ["# Reisekostenübersicht", "", "## Belegübersicht", ""]
-    coverage = report["coverage"]
-    lines.extend(
-        [
-            f"- Bereitgestellt: {coverage['supplied']}",
-            f"- Verarbeitet: {coverage['processed']}",
-            f"- Fehlgeschlagen: {coverage['failed']}",
-            f"- Zu prüfen: {coverage['needs_review']}",
-            "",
-            "Nur bereitgestellte Dokumente berücksichtigt. Summen sind vorläufig.",
-            "Fehlende Beträge sind nicht als Null zu verstehen.",
-            "",
-        ]
-    )
-
-    def table(title, headers, rows):
-        lines.extend(
-            [
-                f"## {title}",
-                "",
-                "| " + " | ".join(headers) + " |",
-                "| " + " | ".join("---" for _ in headers) + " |",
-            ]
-        )
-        lines.extend("| " + " | ".join(cell(v) for v in row) + " |" for row in rows)
-        if not rows:
-            lines.append("Keine Einträge.")
-        lines.append("")
-
-    def period(e):
-        return f"{e['service_start'] or 'Unbekannt'} bis {e['service_end'] or 'Unbekannt'}"
-
-    def source(e):
-        return f"{e['filename']} ({e['document_id']}) / {', '.join(map(str, e['pages'])) or 'Unbekannt'}"
-
-    table(
-        "Ausgaben nach Datum",
-        [
-            "Datum",
-            "Leistungszeitraum",
-            "Anbieter",
-            "Kategorie",
-            "Beschreibung",
-            "Betrag",
-            "Währung",
-            "Beleg / Seite",
-        ],
-        [
-            [
-                e["date"],
-                period(e),
-                e["merchant"],
-                e["category"],
-                e["description"] + (" (zu prüfen)" if e["status"] == "needs_review" else ""),
-                money(e["amount"]),
-                e["currency"],
-                source(e),
-            ]
-            for e in report["expenses"]
-        ],
-    )
-    for title, key, columns in [
-        ("Tagessummen", "by_date", [("Datum", "date"), ("Währung", "currency")]),
-        (
-            "Summen nach Kategorie",
-            "by_category",
-            [("Kategorie", "category"), ("Währung", "currency")],
-        ),
-        ("Gesamtsummen", "by_currency", [("Währung", "currency")]),
-    ]:
-        table(
-            title,
-            [label for label, _ in columns] + ["Bestätigt", "In Prüfung", "Fehlende Beträge"],
-            [
-                [g[field] for _, field in columns]
-                + [money(g["confirmed"]), money(g["in_review"]), g["unknown_amounts"]]
-                for g in report["totals"][key]
-            ],
-        )
-    table(
-        "Unterkunft und Frühstück",
-        [
-            "Beleg / Seite",
-            "Zeitraum",
-            "Währung",
-            "Gesamtbetrag",
-            "Frühstück",
-            "Ohne Frühstück",
-            "Berechnung / Hinweise",
-        ],
-        [
-            [
-                source(e),
-                period(e),
-                e["currency"],
-                money(e["total"]),
-                money(e["breakfast"]),
-                money(e["without_breakfast"]),
-                f"{money(e['total'])} − {money(e['breakfast'])}; übrige Steuern bleiben enthalten."
-                if e["without_breakfast"] is not None
-                else "Keine eindeutige Frühstückssumme verfügbar.",
-            ]
-            for e in report["accommodation"]
-        ],
-    )
-    lines.extend(["## Prüfhinweise", ""])
-    lines.extend(f"- {cell(w['document_id'])}: {cell(w['message'])}" for w in report["warnings"])
-    if not report["warnings"]:
-        lines.append("- Keine automatisch erkannten Unstimmigkeiten. Belege bitte prüfen.")
-    return "\n".join(lines) + "\n"

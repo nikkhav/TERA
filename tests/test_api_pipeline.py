@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -55,6 +56,16 @@ def api():
     app.dependency_overrides[get_session] = sessions
     app.dependency_overrides[get_store] = lambda: store
     with TestClient(app) as client:
+        auth = client.post(
+            "/auth/register",
+            json={
+                "email": "test@example.com",
+                "display_name": "Test User",
+                "password": "correct horse battery staple",
+            },
+        )
+        assert auth.status_code == 201, auth.text
+        client.headers["Authorization"] = f"Bearer {auth.json()['access_token']}"
         yield client, factory, store
     app.dependency_overrides.clear()
     engine.dispose()
@@ -84,8 +95,27 @@ class FakeExtractor:
             currency="EUR",
             total="712.60",
             breakfast_total="71.40",
+            items=[
+                {"description": "Unterkunft", "category": "Hotel", "gross": "641.20"},
+                {
+                    "description": "Frühstück",
+                    "category": "Verpflegung",
+                    "gross": "71.40",
+                    "is_breakfast": True,
+                },
+            ],
             evidence=[{"page": pages[0]["page"], "quote": "Hotel"}],
         )
+
+
+def test_employee_list_is_sorted_and_paginated(api):
+    client, _, _ = api
+    for name in ("Zulu", "beta", "Alpha"):
+        assert client.post("/employees", json={"name": name}).status_code == 201
+    first_page = client.get("/employees", params={"limit": 2, "offset": 0}).json()
+    second_page = client.get("/employees", params={"limit": 2, "offset": 2}).json()
+    assert [employee["name"] for employee in first_page] == ["Alpha", "beta"]
+    assert [employee["name"] for employee in second_page] == ["Zulu"]
 
 
 def test_complete_api_workflow_and_snapshot(api):
@@ -113,8 +143,8 @@ def test_complete_api_workflow_and_snapshot(api):
     assert result["is_stale"] is False
     assert result["totals"]["by_currency"][0]["confirmed"] == "712.60"
     assert [e["amount"] for e in result["expenses"]] == ["641.20", "71.40"]
-    assert "641,20" in result["markdown"]
-    assert client.get(f"/summary-jobs/{job['id']}/markdown").status_code == 200
+    assert "markdown" not in result
+    assert client.get(f"/summary-jobs/{job['id']}/markdown").status_code == 404
     upload(client, tid, "hotel_invoice_zh.pdf")
     assert client.get(f"/summary-jobs/{job['id']}/result").json()["is_stale"] is True
     assert len(result["documents"]) == 1
@@ -127,7 +157,7 @@ def test_failed_extraction_is_visible(api):
     job = client.post(f"/trips/{tid}/summaries").json()
 
     class BrokenExtractor:
-        def extract(self, *_):
+        def extract(self, *_, **kwargs):
             raise TimeoutError("offline")
 
     settings = Settings(_env_file=None)
@@ -208,6 +238,25 @@ def record(currency="EUR", total="712.60", breakfast="71.40", identifier="a", in
         currency=currency,
         total=total,
         breakfast_total=breakfast,
+        items=[
+            {
+                "description": "Unterkunft",
+                "category": "Hotel",
+                "gross": str(Decimal(total) - Decimal(breakfast or "0")),
+            },
+        ]
+        + (
+            [
+                {
+                    "description": "Frühstück",
+                    "category": "Verpflegung",
+                    "gross": breakfast,
+                    "is_breakfast": True,
+                }
+            ]
+            if breakfast
+            else []
+        ),
         evidence=[{"page": 1, "quote": "Hotel"}],
     )
     chunks = [[{"page": 1, "part": 1, "text": "Hotel"}]]
@@ -235,12 +284,71 @@ def test_conflicting_fragments_are_not_summed():
     assert any("Widersprüchliche" in w for w in merged["warnings"])
 
 
-def test_missing_breakfast_keeps_total_and_markdown_escapes_content():
+def test_missing_breakfast_keeps_total():
     item = record(breakfast=None)
-    item["facts"]["merchant"] = "<script>evil</script> | [click](https://example.com)\n# Heading"
     report = make_report([item], "test", "test")
     assert report["expenses"][0]["amount"] == "712.60"
     assert report["accommodation"][0]["without_breakfast"] is None
-    assert "<script>" not in report["markdown"]
-    assert "\\|" in report["markdown"]
-    assert "\\[click\\]" in report["markdown"]
+
+
+def test_manual_review_persists_audit_and_recalculates_totals(api):
+    from uuid import uuid4
+
+    client, factory, _ = api
+    tid = trip(client)
+    doc_id = upload(client, tid).json()["id"]
+    job_id = client.post(f"/trips/{tid}/summaries").json()["id"]
+    url = f"/summary-jobs/{job_id}/documents/{doc_id}/review"
+    assert client.put(url, json={"decision": "approved"}).status_code == 409
+
+    class UncertainExtractor(FakeExtractor):
+        def extract(self, document_id, pages, feedback=None):
+            facts = super().extract(document_id, pages)
+            facts.notes = ["Bitte Rechnungsdatum prüfen."]
+            return facts
+
+    settings = Settings(_env_file=None)
+    process_job(factory, settings, *claim_job(factory, settings), extractor=UncertainExtractor())
+    response = client.put(url, json={"decision": "approved", "comment": "Mit PDF abgeglichen"})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "completed" and not result["warnings"]
+    assert result["totals"]["by_currency"][0]["confirmed"] == "712.60"
+    assert result["documents"][0]["warnings"]  # Original findings are retained.
+    event = result["documents"][0]["review_history"][0]
+    assert event["user_name"] == "Test User" and event["reviewed_at"]
+    assert event["comment"] == "Mit PDF abgeglichen"
+    result = client.put(url, json={"decision": "rejected"}).json()
+    total = result["totals"]["by_currency"][0]
+    assert total["confirmed"] == "0" and total["in_review"] == "0"
+    assert total["excluded"] == "712.60"
+    assert all(e["status"] == "rejected" for e in result["expenses"])
+    result = client.put(url, json={"decision": "pending"}).json()
+    assert result["status"] == "needs_review"
+    assert result["warnings"][0]["filename"] == "hotel_invoice.pdf"
+    assert len(result["documents"][0]["review_history"]) == 3
+    assert client.get(f"/summary-jobs/{job_id}/result").json() == result
+    assert (
+        client.put(url.replace(doc_id, str(uuid4())), json={"decision": "approved"}).status_code
+        == 404
+    )
+    client.headers.pop("Authorization")
+    assert client.put(url, json={"decision": "approved"}).status_code == 401
+
+
+def test_incomplete_extraction_cannot_be_manually_approved(api):
+    client, factory, _ = api
+    tid = trip(client)
+    doc_id = upload(client, tid).json()["id"]
+    job_id = client.post(f"/trips/{tid}/summaries").json()["id"]
+
+    class BrokenExtractor:
+        def extract(self, *_, **kwargs):
+            raise TimeoutError("offline")
+
+    settings = Settings(_env_file=None)
+    process_job(factory, settings, *claim_job(factory, settings), extractor=BrokenExtractor())
+    response = client.put(
+        f"/summary-jobs/{job_id}/documents/{doc_id}/review", json={"decision": "approved"}
+    )
+    assert response.status_code == 409

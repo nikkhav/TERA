@@ -1,6 +1,6 @@
 # TERA — Travel Expense Review Assistant
 
-TERA organizes PDF receipts by employee and trip, then generates a German expense report. The backend uses FastAPI, Postgres, S3-compatible storage, and Ollama.
+TERA organizes PDF receipts by employee and trip, then generates a German expense report. It includes a German React interface, a FastAPI backend, Postgres, S3-compatible storage, and Ollama.
 
 **Employee → Trip → Upload PDFs → Generate summary**
 
@@ -24,7 +24,9 @@ If `.env` already exists, edit it instead of replacing it. The application uses 
 docker compose up --build -d
 ```
 
-This starts Postgres, file storage, Ollama, the API, and a worker. Setup services create the database tables and storage bucket, and download the selected model. The worker starts after the download succeeds. The first startup can take a while.
+This starts the web interface, API, worker, Postgres, file storage, and Ollama. Setup services create the database tables and storage bucket, and download the selected model. The worker starts after the download succeeds. The first startup can take a while.
+
+Docker keeps its Ollama files in a separate volume, so a model already installed on the host is not reused automatically. The command above can therefore download another copy. For day-to-day development, use the local setup below; it connects to the host Ollama installation directly. Only use the full Docker startup when an isolated deployment-style environment is required.
 
 Check progress:
 
@@ -35,18 +37,17 @@ docker compose logs -f model-init worker
 
 Model files, uploaded PDFs, and the database are stored in persistent Docker volumes. Existing model files are reused on subsequent starts. Model files installed in a host Ollama installation are separate from the Docker volume.
 
-### 3. Open the API
+### 3. Open the application
 
-Open [localhost:8000/docs](http://localhost:8000/docs). You can try every operation there without a frontend.
+Open [localhost:3000](http://localhost:3000). The interface guides you through the normal workflow:
 
-Use **Try it out**, fill in the fields, and click **Execute**:
+1. Add an employee.
+2. Create a trip for that employee.
+3. Upload the trip's PDF receipts.
+4. Click **Auswertung erstellen**.
+5. Review totals, categories, expenses, and flagged inconsistencies.
 
-1. Create an employee with `POST /employees`, for example `{"name": "Alex Morgan"}`. Copy the returned `id`.
-2. Create a trip with `POST /employees/{employee_id}/trips`, for example `{"name": "Berlin, September 2026"}`. Copy the trip `id`.
-3. Upload a PDF with `POST /trips/{trip_id}/documents`. Repeat for each receipt. Sample files are in `research/data/`.
-4. Start a report with `POST /trips/{trip_id}/summaries`. Copy the job `id`.
-5. Check `GET /summary-jobs/{job_id}` until processing finishes.
-6. Get the report from `GET /summary-jobs/{job_id}/result`, or download Markdown from `/summary-jobs/{job_id}/markdown`.
+The API documentation remains available at [localhost:8000/docs](http://localhost:8000/docs).
 
 ### Stop and restart
 
@@ -69,7 +70,7 @@ docker compose up -d --force-recreate api worker
 
 Let active jobs finish before changing the model. The selected model is recorded with each report. The application has no model-name-specific behavior or fallback model list.
 
-`OLLAMA_THINK` is an optional request setting. Leave it unset if the selected model does not support it. Context size, output budget, and timeout are also configured in `.env`. `OLLAMA_IMAGE` selects the Ollama container version; use a tested version or image digest for a deployment.
+`OLLAMA_THINK=false` keeps Qwen's internal reasoning out of the structured response budget. Change it only when the selected model requires a different value. Context size, output budget, and timeout are also configured in `.env`. `OLLAMA_IMAGE` selects the Ollama container version; use a tested version or image digest for a deployment.
 
 The default Docker configuration runs inference on CPU. On a Linux server with an NVIDIA GPU and NVIDIA Container Toolkit installed, use:
 
@@ -79,41 +80,62 @@ docker compose -f compose.yaml -f compose.gpu.yaml up --build -d
 
 See the official [Ollama Docker instructions](https://docs.ollama.com/docker) for GPU setup. On Apple Silicon, running Ollama directly on macOS is preferable for GPU acceleration; use the local development setup below.
 
-## Local development
+To keep Postgres, file storage, the API, and the web interface in Docker while using the
+existing macOS Ollama installation, start the stack with both Compose files:
 
-Use Python 3.11 or newer, `uv`, and a running local Ollama. Keep Postgres and file storage in Docker:
+```bash
+docker compose -f compose.yaml -f compose.host-ollama.yaml up --build -d
+```
+
+Ollama must already be running on macOS and the selected model must already be installed.
+This configuration does not install or update a model.
+
+## Local development without Docker
+
+Docker is not required while developing. The local setup uses SQLite and the `.local/documents` folder instead of Postgres and S3. A local Ollama installation must be running.
 
 ```bash
 uv sync --locked
-docker compose up -d postgres s3
-uv run alembic upgrade head
-uv run python -m tera.init_storage
+cd frontend && npm install && cd ..
+make dev-setup
 ```
 
-Download the model named in `.env` using `ollama pull <model>`. Then start the API and worker in separate terminals:
+`make dev-setup` creates `.env.development`, the SQLite database, and local document storage. Run it again after a new database migration. Download the model named in `.env.development` with Ollama.
+
+Start three development processes in separate terminals:
 
 ```bash
-uv run uvicorn tera.api:app --reload
+make dev-api
 ```
 
 ```bash
-uv run python -m tera.worker
+make dev-worker
 ```
 
-Both processes must be running. Local processes use `OLLAMA_URL` from `.env`; Docker services use the internal Ollama address. If the full Docker stack is already running, stop its `api` and `worker` before starting local copies.
+```bash
+make dev-web
+```
+
+Open [localhost:5173](http://localhost:5173). Python and React changes reload automatically, so Docker does not need to be rebuilt. Do not run the Docker API and local API at the same time because both use port 8000.
+
+## Authentication
+
+Users create an account with their name, email address, and a password of at least 12 characters. Passwords are stored as Argon2 hashes. The API returns a signed, expiring access token; Axios attaches it to protected requests and returns the user to the login screen when the session expires.
+
+Set `AUTH_ALLOW_REGISTRATION=false` after creating the required accounts in a closed deployment. Set a unique `AUTH_SECRET_KEY` of at least 32 bytes and `APP_ENVIRONMENT=production` before production deployment. The default development secret is rejected when the production environment is selected.
 
 ## API and report data
 
-`GET /summary-jobs/{id}/result` returns structured JSON and a rendered `markdown` field:
+`GET /summary-jobs/{id}/result` returns structured JSON:
 
 - `coverage`: document counts and processing failures.
-- `documents`: extracted facts, source quotations, and review notes.
+- `documents`: extracted totals, tax fields, line items, source quotations, and validation issues.
 - `expenses`: dated expense rows with categories and source pages.
 - `totals`: totals by date, category, and currency.
 - `accommodation`: hotel and breakfast amounts.
 - `warnings`: items requiring review.
 
-Amounts are decimal strings such as `"712.60"`; missing values are `null`. A frontend can use JSON for tables and filters, and Markdown for export. Response types are documented in `/docs` and `/openapi.json`.
+Amounts are decimal strings such as `"712.60"`; missing values are `null`. The frontend uses this JSON directly for tables and filters. Response types are documented in `/docs` and `/openapi.json`.
 
 Jobs have these states: `queued`, `running`, `completed`, `needs_review`, or `failed`. Progress is available through `completed_chunks` and `total_chunks`. Partial results identify failed documents explicitly. Completion is not an approval for reimbursement.
 
@@ -123,9 +145,19 @@ Generating a report captures the documents currently in the trip. Repeated reque
 
 Uploads must be readable PDFs with selectable text. Default limits are 20 MB and 200 pages per file. Each PDF should contain one receipt or invoice, which can span multiple pages.
 
-The worker splits document text into bounded requests while retaining page references. It uses a conservative UTF-8 byte budget with space reserved for instructions and output, rather than a model-specific tokenizer. Failed or truncated responses become review items.
+The worker splits document text into bounded requests while retaining page references. It uses a conservative UTF-8 byte budget with space reserved for instructions, output, and a possible correction request. Failed or truncated responses become review items.
 
-The model extracts facts from each part. Python validates references, merges consistent facts, calculates totals using `Decimal`, and renders Markdown in a fixed layout. Conflicting values and suspected duplicates require review; they are excluded from confirmed totals. Each currency is kept separate. Separate breakfast charges are assigned to Verpflegung without being counted twice.
+The model keeps net, tax, and gross amounts separate and extracts individual expense lines with exact source quotations. Python checks invoice arithmetic, line totals, tax components, breakfast amounts, dates, categories, duplicates, and source evidence using `Decimal`. If a check fails, the affected document part is sent through one focused correction pass. Unresolved conflicts require review and are excluded from confirmed totals.
+
+The German report is displayed from the validated JSON structure in a fixed layout. Each currency stays separate. A priced breakfast is assigned to `Verpflegung` once; an included breakfast without a stated price remains unknown.
+
+An upload and a report generation are separate operations:
+
+1. The API checks the PDF, extracts its existing text layer page by page, stores the original PDF in object storage, and stores the extracted pages in the database.
+2. **Auswertung erstellen** creates a job containing the current document IDs, model name, and prompt version. The API responds immediately.
+3. The worker claims the job, splits long documents into requests that fit the configured context window, and sends every part to Ollama. The expected JSON Schema is passed through Ollama's structured-output parameter rather than repeated in the document prompt.
+4. Python verifies source quotations and reconciles dates, categories, line items, tax, gross, and breakfast amounts. A focused correction request is made only for validation issues that can benefit from another extraction. Truncated requests are not repeated unchanged.
+5. The worker combines all validated documents into structured JSON. The browser polls the job while it runs and then loads the result.
 
 Jobs are stored in Postgres. Workers claim them with database locks and renewable leases. An interrupted job can be reclaimed after the lease expires, by default after 20 minutes. It restarts from its document snapshot; three interrupted attempts mark it as failed.
 
@@ -135,6 +167,7 @@ Jobs are stored in Postgres. Workers claim them with database locks and renewabl
 | --- | --- |
 | API documentation | http://localhost:8000/docs |
 | API readiness | http://localhost:8000/ready |
+| Web interface | http://localhost:3000 |
 | Postgres | localhost:5433 |
 | S3 API | http://localhost:9000 |
 | Storage console | http://localhost:9001 |
@@ -144,10 +177,22 @@ Storage credentials are in `.env`. Ollama is accessible only within the Docker n
 - **Docker connection error:** open Docker Desktop and wait until it is ready.
 - **Job stays queued:** check the worker and model download logs.
 - **Model download fails:** check the model name and Ollama version, then rerun `docker compose run --rm model-init` and `docker compose up -d worker`.
-- **Job fails:** check `docker compose logs worker`, resolve the error, and create a new job.
+- **Job fails or takes too long:** run `docker compose logs --since=15m worker ollama`. Worker log lines include the job, document, pages, request duration, token counts, and Ollama completion reason. The browser console also records failed API requests and failed summary jobs.
 - **PDF rejected:** check the page number in the error and confirm that its text can be selected.
 
-The supplied configuration is for local development. Authentication and employee-level access control are not implemented. Add them and replace development credentials before making the API available to other users.
+The supplied configuration is for local development. Authentication is implemented, but all authenticated users currently share the same employee and trip workspace. Add organization and role-based access control before using one deployment for separate companies.
+
+## Frontend structure
+
+The React application is organized by responsibility:
+
+- `src/pages`: complete screens and their workflow orchestration.
+- `src/features`: authentication, employees, trips, documents, and summary UI.
+- `src/shared/api`: Axios client and one API module per resource.
+- `src/shared/ui`: reusable buttons, dialogs, status indicators, and empty states.
+- `src/shared/types` and `src/shared/lib`: API contracts and formatting helpers.
+
+React Query owns server state, polling, cache invalidation, and loading states. React Router keeps the selected employee and trip in the URL.
 
 ## Research and tests
 
@@ -159,7 +204,8 @@ Run the tests:
 
 ```bash
 uv run pytest
-uv run ruff check tera tests/test_api_pipeline.py tests/test_llm.py tests/test_integration.py
+uv run ruff check tera tests
+cd frontend && npm run format:check && npm run lint && npm run build
 ```
 
 To test with real Postgres and S3 services, start those containers and run:
@@ -169,3 +215,28 @@ TERA_INTEGRATION=1 uv run pytest tests/test_integration.py
 ```
 
 The integration test uses an isolated database schema and storage bucket, removes its test data afterward, and substitutes a fixed model response. Model quality is evaluated separately.
+
+## Manual receipt review
+
+In **Ausgaben**, click the PDF filename to review the receipt. The dialog shows its
+expenses, source quotations, automatic findings, and a PDF download. **Geprüft und
+bestätigt** confirms all expenses from that receipt. **Ablehnen** excludes those
+amounts from confirmed totals; rejected amounts remain visible separately.
+**Prüfung zurücksetzen** restores the automatic assessment. Missing amounts or
+currencies cannot be approved until extraction succeeds.
+
+Decisions are stored for that particular report with the signed-in user's name,
+time, and optional comment. Original extraction findings are preserved. JSON,
+and category totals reflect the current decision and include its audit
+history. A newly generated report requires its own review.
+
+`PUT /summary-jobs/{job_id}/documents/{document_id}/review` accepts a `decision`
+(`approved`, `rejected`, or `pending`) and an optional `comment`. The API locks the
+report while updating it so concurrent reviews cannot overwrite each other.
+
+Document context such as an explicitly fictional invoice or a draft appears under
+**Beleghinweise**. These German notices are separate from extraction failures and
+validation issues: they do not trigger a correction request, change the report
+status, or remove amounts from confirmed totals. They remain visible after manual
+review. The API exposes them as `notices` at report
+and document level.

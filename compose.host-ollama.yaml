@@ -1,0 +1,17 @@
+services:
+  ollama:
+    profiles: [container-model]
+
+  model-init:
+    profiles: [container-model]
+
+  api:
+    environment:
+      OLLAMA_URL: http://host.docker.internal:11434
+
+  worker:
+    depends_on: !override
+      init:
+        condition: service_completed_successfully
+    environment:
+      OLLAMA_URL: http://host.docker.internal:11434

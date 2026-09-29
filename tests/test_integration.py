@@ -55,6 +55,15 @@ def test_postgres_s3_pipeline():
                 currency="EUR",
                 total="712.60",
                 breakfast_total="71.40",
+                items=[
+                    {"description": "Unterkunft", "category": "Hotel", "gross": "641.20"},
+                    {
+                        "description": "Frühstück",
+                        "category": "Verpflegung",
+                        "gross": "71.40",
+                        "is_breakfast": True,
+                    },
+                ],
                 evidence=[{"page": 1, "quote": "NORTHSTAR HOTEL BERLIN"}],
             )
 
@@ -63,6 +72,16 @@ def test_postgres_s3_pipeline():
     try:
         with TestClient(app) as client:
             assert client.get("/ready").status_code == 200
+            auth = client.post(
+                "/auth/register",
+                json={
+                    "email": f"integration-{suffix}@example.com",
+                    "display_name": "Integration User",
+                    "password": "correct horse battery staple",
+                },
+            )
+            assert auth.status_code == 201, auth.text
+            client.headers["Authorization"] = f"Bearer {auth.json()['access_token']}"
             employee = client.post("/employees", json={"name": "Integration test"}).json()
             trip = client.post(
                 f"/employees/{employee['id']}/trips", json={"name": "Test trip"}

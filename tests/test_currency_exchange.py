@@ -20,8 +20,12 @@ class CurrencyConversionTests(unittest.TestCase):
         self.assertEqual(convert_amount("0", self.rate()), Decimal("0.00"))
 
     def test_target_currency_precision(self):
-        self.assertEqual(convert_amount("1", self.rate("150.5", "JPY"), decimal_places=0), Decimal("151"))
-        self.assertEqual(convert_amount("1", self.rate("0.3075", "KWD"), decimal_places=3), Decimal("0.308"))
+        self.assertEqual(
+            convert_amount("1", self.rate("150.5", "JPY"), decimal_places=0), Decimal(151)
+        )
+        self.assertEqual(
+            convert_amount("1", self.rate("0.3075", "KWD"), decimal_places=3), Decimal("0.308")
+        )
 
     def test_invalid_rates_and_amounts(self):
         for rate in ("0", "-1", "NaN", "Infinity"):

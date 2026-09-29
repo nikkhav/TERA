@@ -1,10 +1,10 @@
 import time
 
-from tera.storage import ObjectStore
+from tera.storage import get_store
 
 
 def main():
-    store = ObjectStore()
+    store = get_store()
     for attempt in range(30):
         try:
             store.ensure_bucket()

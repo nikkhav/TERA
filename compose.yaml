@@ -4,6 +4,11 @@ x-app: &app
   build: .
   environment:
     DATABASE_URL: postgresql+psycopg://tera:${POSTGRES_PASSWORD:-tera-local}@postgres:5432/tera
+    APP_ENVIRONMENT: ${APP_ENVIRONMENT:-development}
+    AUTH_SECRET_KEY: ${AUTH_SECRET_KEY:-development-secret-change-before-production}
+    AUTH_TOKEN_MINUTES: ${AUTH_TOKEN_MINUTES:-480}
+    AUTH_ALLOW_REGISTRATION: ${AUTH_ALLOW_REGISTRATION:-true}
+    STORAGE_BACKEND: s3
     S3_ENDPOINT_URL: http://s3:9000
     S3_ACCESS_KEY: ${S3_ACCESS_KEY:-tera-local}
     S3_SECRET_KEY: ${S3_SECRET_KEY:-tera-local-secret}
@@ -11,9 +16,10 @@ x-app: &app
     S3_REGION: ${S3_REGION:-us-east-1}
     OLLAMA_URL: http://ollama:11434
     OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
-    OLLAMA_THINK: ${OLLAMA_THINK:-}
+    OLLAMA_THINK: ${OLLAMA_THINK:-false}
     MODEL_CONTEXT_TOKENS: ${MODEL_CONTEXT_TOKENS:-8192}
-    MODEL_OUTPUT_TOKENS: ${MODEL_OUTPUT_TOKENS:-1536}
+    MODEL_OUTPUT_TOKENS: ${MODEL_OUTPUT_TOKENS:-2048}
+    RECEIPT_RECHECK_ENABLED: ${RECEIPT_RECHECK_ENABLED:-true}
     MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-300}
     JOB_LEASE_SECONDS: ${JOB_LEASE_SECONDS:-1200}
 
@@ -101,6 +107,14 @@ services:
       model-init:
         condition: service_completed_successfully
     restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres-data:

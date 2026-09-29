@@ -1,7 +1,7 @@
 """Create employees trips documents and summary jobs"""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "50c7c69a4278"
 down_revision = None

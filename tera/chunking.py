@@ -1,4 +1,4 @@
-from tera.prompts import build_prompt
+from tera.prompts import RECHECK_RESERVE, build_prompt
 
 
 def prompt_budget(settings) -> int:
@@ -8,7 +8,7 @@ def prompt_budget(settings) -> int:
 
 
 def chunk_pages(document_id: str, pages: list[dict], settings) -> list[list[dict]]:
-    limit = prompt_budget(settings)
+    limit = prompt_budget(settings) - RECHECK_RESERVE
     chunks, current = [], []
     for page in pages:
         remaining = page["text"]

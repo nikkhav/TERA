@@ -7,13 +7,15 @@ from tera.db import session_factory
 from tera.jobs import LostLease, claim_job, update_job
 from tera.llm import OllamaExtractor
 from tera.models import Document, SummaryJob, now
+from tera.processing import process_document
 from tera.prompts import PROMPT_VERSION
-from tera.reporting import make_report, merge_fragments
+from tera.reporting import make_report
 
 logger = logging.getLogger(__name__)
 
 
 def process_job(factory, settings, job_id, token, extractor=None):
+    started = time.monotonic()
     try:
         with factory() as session:
             job = session.get(SummaryJob, job_id)
@@ -26,22 +28,36 @@ def process_job(factory, settings, job_id, token, extractor=None):
         extractor = extractor or OllamaExtractor(settings)
         batches = [(doc, chunk_pages(doc.id, doc.pages, settings)) for doc in documents]
         total = sum(len(chunks) for _, chunks in batches)
+        logger.info(
+            "job_started job_id=%s trip_id=%s documents=%s chunks=%s model=%s",
+            job_id,
+            job.trip_id,
+            len(documents),
+            total,
+            model,
+        )
         update_job(factory, settings, job_id, token, total_chunks=total)
-        records, completed = [], 0
+        records, completed_count = [], 0
+
+        def progress(completed=0, added=0):
+            nonlocal total, completed_count
+            total += added
+            completed_count += completed
+            update_job(
+                factory,
+                settings,
+                job_id,
+                token,
+                completed_chunks=completed_count,
+                total_chunks=total,
+            )
+
         for document, chunks in batches:
-            fragments, errors = [], []
-            for chunk in chunks:
-                try:
-                    fragments.append(extractor.extract(document.id, chunk))
-                except Exception:
-                    logger.exception("Extraction failed: job=%s document=%s", job_id, document.id)
-                    pages = sorted({p["page"] for p in chunk})
-                    errors.append(
-                        f"Extraktion fehlgeschlagen, Seiten {pages}. Bitte erneut versuchen."
-                    )
-                completed += 1
-                update_job(factory, settings, job_id, token, completed_chunks=completed)
-            records.append(merge_fragments(document, fragments, errors, chunks))
+            records.append(
+                process_document(
+                    document, chunks, extractor, settings, progress, job_id=job_id
+                )
+            )
         report = make_report(records, model, prompt_version)
         status = "needs_review" if report["coverage"]["needs_review"] else "completed"
         if report["coverage"]["failed"] == report["coverage"]["supplied"]:
@@ -54,12 +70,26 @@ def process_job(factory, settings, job_id, token, extractor=None):
             status=status,
             result=report,
             finished_at=now(),
-            error="Extraction failed for all documents" if status == "failed" else None,
+            error="Alle Dokumente konnten nicht verarbeitet werden."
+            if status == "failed"
+            else None,
+        )
+        logger.info(
+            "job_finished job_id=%s status=%s duration_seconds=%.2f supplied=%s processed=%s "
+            "needs_review=%s",
+            job_id,
+            status,
+            time.monotonic() - started,
+            report["coverage"]["supplied"],
+            report["coverage"]["processed"],
+            report["coverage"]["needs_review"],
         )
     except LostLease:
         logger.warning("Lease lost: %s", job_id)
     except Exception:
-        logger.exception("Job failed: %s", job_id)
+        logger.exception(
+            "job_failed job_id=%s duration_seconds=%.2f", job_id, time.monotonic() - started
+        )
         try:
             update_job(
                 factory,
@@ -68,7 +98,7 @@ def process_job(factory, settings, job_id, token, extractor=None):
                 token,
                 status="failed",
                 finished_at=now(),
-                error="Generation failed. Check worker logs and create a new job.",
+                error="Die Auswertung ist fehlgeschlagen. Bitte erneut versuchen.",
             )
         except LostLease:
             pass
