@@ -195,3 +195,65 @@ def test_breakfast_tax_derived_from_verified_line_amounts_has_no_false_warning()
     reconciled, _, derived, _ = reconcile(checked)
     assert str(reconciled.breakfast_tax) == "11.40"
     assert "breakfast_tax" in derived
+
+
+def test_derived_gross_and_resolved_echo_do_not_create_false_warning():
+    from tera.llm import verify_facts
+    from tera.reconciliation import reconcile
+    from tera.schemas import ReceiptFacts
+
+    quote = "机票\n100.00\n6%\n6.00"
+    facts = ReceiptFacts(
+        merchant="Airline",
+        invoice_date="2026-07-29",
+        category="Flugreisen",
+        currency="CNY",
+        total="106",
+        evidence=[{"page": 1, "field": "total", "quote": "总金额 106.00"}],
+        items=[
+            {
+                "description": "Flug",
+                "category": "Flugreisen",
+                "net": "100",
+                "tax": "6",
+                "gross": "106",
+                "evidence": [
+                    {"page": 1, "field": field, "quote": quote} for field in ("net", "tax")
+                ],
+            }
+        ],
+        notes=["Position 1 (Flug): Bruttobetrag nicht eindeutig im Beleg nachgewiesen."],
+    )
+    checked = verify_facts(facts, [{"page": 1, "text": quote + "\n总金额 106.00"}])
+    assert not checked.notes
+    assert checked.items[0].gross is None
+    result, issues, derived, _ = reconcile(checked)
+    assert not issues
+    assert result.items[0].gross == 106
+    assert "items.0.gross" in derived
+
+
+def test_supported_hotel_price_needs_no_tax_split():
+    from tera.llm import verify_facts
+    from tera.reconciliation import reconcile
+    from tera.schemas import ReceiptFacts
+
+    facts = ReceiptFacts(
+        merchant="Hotel",
+        invoice_date="2026-07-29",
+        category="Hotel",
+        currency="CNY",
+        total="278.98",
+        items=[
+            {
+                "description": "Zimmer",
+                "category": "Hotel",
+                "gross": "278.98",
+                "evidence": [{"page": 1, "field": "gross", "quote": "房费\n1间\n278.98"}],
+            }
+        ],
+        evidence=[{"page": 1, "field": "total", "quote": "总金额\n278.98"}],
+    )
+    checked = verify_facts(facts, [{"page": 1, "text": "房费\n1间\n278.98\n总金额\n278.98"}])
+    assert not checked.notes
+    assert not reconcile(checked)[1]

@@ -4,8 +4,10 @@ import time
 from tera.chunking import chunk_pages
 from tera.config import get_settings
 from tera.db import session_factory
+from tera.exchange_rates import attach_rate
 from tera.jobs import LostLease, claim_job, update_job
 from tera.llm import OllamaExtractor
+from tera.localization import localize_record
 from tera.models import Document, SummaryJob, now
 from tera.processing import process_document
 from tera.prompts import PROMPT_VERSION
@@ -54,10 +56,15 @@ def process_job(factory, settings, job_id, token, extractor=None):
 
         for document, chunks in batches:
             records.append(
-                process_document(
-                    document, chunks, extractor, settings, progress, job_id=job_id
-                )
+                process_document(document, chunks, extractor, settings, progress, job_id=job_id)
             )
+        if isinstance(extractor, OllamaExtractor):
+            progress(added=len(records))
+        for record in records:
+            if isinstance(extractor, OllamaExtractor):
+                localize_record(record, settings, progress)
+            attach_rate(record)
+            progress(completed=1 if isinstance(extractor, OllamaExtractor) else 0)
         report = make_report(records, model, prompt_version)
         status = "needs_review" if report["coverage"]["needs_review"] else "completed"
         if report["coverage"]["failed"] == report["coverage"]["supplied"]:

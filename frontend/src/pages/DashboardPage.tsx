@@ -5,6 +5,7 @@ import {
   LoaderCircle,
   Menu,
   Plus,
+  Pencil,
   RefreshCw,
   Soup,
   X,
@@ -31,7 +32,7 @@ import { EmployeeSidebar } from "../features/employees/EmployeeSidebar";
 import { useAuth } from "../features/auth/auth-context";
 import { SummaryView } from "../features/summary/SummaryView";
 import { TripForm } from "../features/trips/TripForm";
-import { TripSelector } from "../features/trips/TripSelector";
+import { TripList } from "../features/trips/TripList";
 
 export function DashboardPage() {
   const { employeeId, tripId } = useParams();
@@ -39,6 +40,7 @@ export function DashboardPage() {
   const queryClient = useQueryClient();
   const { user, logout } = useAuth();
   const [employeeModal, setEmployeeModal] = useState(false);
+  const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
   const [tripModal, setTripModal] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [localError, setLocalError] = useState("");
@@ -100,6 +102,17 @@ export function DashboardPage() {
         (current = []) => [...current, trip],
       );
       navigate(`/employees/${employeeId}/trips/${trip.id}`);
+    },
+  });
+  const updateTrip = useMutation({
+    mutationFn: ({ trip, input }: { trip: Trip; input: TripInput }) =>
+      tripsApi.update(trip.id, input),
+    onSuccess: (trip) => {
+      queryClient.setQueryData<Trip[]>(
+        ["trips", trip.employee_id],
+        (current = []) =>
+          current.map((item) => (item.id === trip.id ? trip : item)),
+      );
     },
   });
   const generate = useMutation({
@@ -224,8 +237,8 @@ export function DashboardPage() {
           )}
           {!selectedEmployee && !employees.isLoading && (
             <EmployeeOverview
-              employees={employees.data ?? []}
-              onSelect={(employee) => navigate(`/employees/${employee.id}`)}
+              hasEmployees={Boolean(employees.data?.length)}
+              onOpenNavigation={() => setMobileNav(true)}
               onCreate={() => setEmployeeModal(true)}
             />
           )}
@@ -255,19 +268,36 @@ export function DashboardPage() {
                     </p>
                   )}
                 </div>
-                <Button variant="secondary" onClick={() => setTripModal(true)}>
-                  <Plus size={16} />
-                  Neue Reise
-                </Button>
+                {selectedTrip ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => setEditingTrip(selectedTrip)}
+                  >
+                    <Pencil size={16} />
+                    Reise bearbeiten
+                  </Button>
+                ) : (
+                  !tripId && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setTripModal(true)}
+                    >
+                      <Plus size={16} />
+                      Neue Reise
+                    </Button>
+                  )
+                )}
               </section>
-              <TripSelector
-                trips={trips.data ?? []}
-                selectedId={tripId}
-                onSelect={(trip) =>
-                  navigate(`/employees/${employeeId}/trips/${trip.id}`)
-                }
-                onCreate={() => setTripModal(true)}
-              />
+              {!tripId &&
+                (trips.isLoading ? (
+                  <EmptyState
+                    icon={LoaderCircle}
+                    iconClassName="animate-spin"
+                    title="Reisen werden geladen"
+                  />
+                ) : (
+                  <TripList key={employeeId} trips={trips.data ?? []} />
+                ))}
               {selectedTrip ? (
                 <div className="grid items-start gap-6 xl:grid-cols-[330px_minmax(0,1fr)]">
                   <div className="space-y-5">
@@ -372,6 +402,17 @@ export function DashboardPage() {
               await createEmployee.mutateAsync(name);
             }}
             onClose={() => setEmployeeModal(false)}
+          />
+        </Modal>
+      )}
+      {editingTrip && (
+        <Modal title="Reise bearbeiten" onClose={() => setEditingTrip(null)}>
+          <TripForm
+            initialValues={editingTrip}
+            onSave={async (input) => {
+              await updateTrip.mutateAsync({ trip: editingTrip, input });
+            }}
+            onClose={() => setEditingTrip(null)}
           />
         </Modal>
       )}

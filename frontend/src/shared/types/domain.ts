@@ -53,7 +53,50 @@ export type Total = {
 export type ExpenseCategory =
   "Hotel" | "Flugreisen" | "Verpflegung" | "Sonstige Ausgaben";
 
+export type ExchangeRate = {
+  currency: string | null;
+  rate: string | null;
+  requested_on: string | null;
+  as_of: string | null;
+  source: string;
+  source_url: string;
+  error: string | null;
+};
+export type ReceiptItem = {
+  description: string;
+  category: ExpenseCategory | null;
+  net: string | null;
+  tax: string | null;
+  gross: string | null;
+  is_breakfast: boolean;
+  evidence: { page: number; quote: string; field: string | null }[];
+};
+export type ReceiptFacts = {
+  merchant: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  service_start: string | null;
+  service_end: string | null;
+  currency: string | null;
+  category: ExpenseCategory | null;
+  total: string | null;
+  net_total: string | null;
+  tax_total: string | null;
+  breakfast_total: string | null;
+  breakfast_net: string | null;
+  breakfast_tax: string | null;
+  items: ReceiptItem[];
+  overnight_count: number | null;
+  room_count: number | null;
+  transport_mode: string | null;
+  distance_km: string | null;
+  origin: string | null;
+  destination: string | null;
+  flight_number: string | null;
+};
 export type Expense = {
+  amount_eur: string | null;
+  exchange_rate: ExchangeRate | null;
   document_id: string;
   filename: string;
   date: string | null;
@@ -79,6 +122,21 @@ export type ReviewEvent = {
   reviewed_at: string;
 };
 export type DocumentResult = {
+  facts: ReceiptFacts;
+  original_texts: {
+    merchant?: string;
+    items?: string[];
+    warnings?: string[];
+    notices?: string[];
+  };
+  exchange_rate: ExchangeRate | null;
+  correction_history: {
+    user_name: string;
+    corrected_at: string;
+    comment: string;
+    before: ReceiptFacts;
+    after: ReceiptFacts;
+  }[];
   document_id: string;
   filename: string;
   status: string;
@@ -103,7 +161,12 @@ export type Summary = {
   };
   documents: DocumentResult[];
   expenses: Expense[];
-  totals: { by_currency: Total[]; by_category: CategoryTotal[] };
+  totals: {
+    by_currency: Total[];
+    by_category: CategoryTotal[];
+    eur: Total[];
+    by_category_eur: CategoryTotal[];
+  };
   warnings: { document_id: string; filename: string; message: string }[];
   notices: { document_id: string; filename: string; message: string }[];
 };

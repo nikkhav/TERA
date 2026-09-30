@@ -4,6 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 from decimal import Decimal
 
+from tera.exchange_rates import euro_amount
 from tera.labels import FIELD_LABELS
 from tera.reconciliation import reconcile
 from tera.schemas import Category, ReceiptFacts, ValidationIssue
@@ -84,7 +85,13 @@ def mark_duplicates(records):
         f = record["facts"]
         if all(f[key] is not None for key in ("merchant", "invoice_number", "currency", "total")):
             key = (
-                f["merchant"].casefold().strip(),
+                (
+                    f["merchant"]
+                    if record.get("correction_history")
+                    else record.get("original_texts", {}).get("merchant") or f["merchant"]
+                )
+                .casefold()
+                .strip(),
                 f["invoice_number"].casefold().strip(),
                 f["currency"],
                 Decimal(f["total"]),
@@ -108,6 +115,8 @@ def make_report(records, model, prompt_version):
         breakfast = Decimal(f["breakfast_total"]) if f["breakfast_total"] is not None else None
         category = f["category"] or "Sonstige Ausgaben"
         decision = (record.get("review_history") or [{}])[-1].get("decision")
+        if record.get("correction_history") and decision == "pending":
+            record["warnings"].append("Manuell geänderte Angaben müssen bestätigt werden.")
         record["status"] = (
             decision
             if decision in {"approved", "rejected"}
@@ -180,13 +189,21 @@ def make_report(records, model, prompt_version):
                 }
                 for message in dict.fromkeys(record["warnings"])
             )
+    for expense in expenses:
+        record = next(r for r in records if r["document_id"] == expense["document_id"])
+        expense["exchange_rate"] = record.get("exchange_rate")
+        expense["amount_eur"] = euro_amount(
+            expense["amount"], expense["currency"], record.get("exchange_rate")
+        )
     expenses.sort(
         key=lambda e: (e["date"] or "9999", e["document_id"], CATEGORIES.index(e["category"]))
     )
 
-    def aggregate(keys):
+    def aggregate(keys, euro=False):
         groups = {}
         for expense in expenses:
+            if euro:
+                expense = dict(expense, amount=expense["amount_eur"], currency="EUR")
             key = tuple(expense[k] for k in keys)
             group = groups.setdefault(
                 key,
@@ -236,7 +253,7 @@ def make_report(records, model, prompt_version):
     by_category.sort(key=lambda g: (g["currency"] or "~", CATEGORIES.index(g["category"])))
     failed = sum(record["extraction_failed"] for record in records)
     report = {
-        "schema_version": 2,
+        "schema_version": 3,
         "language": "de",
         "model": model,
         "prompt_version": prompt_version,
@@ -250,6 +267,8 @@ def make_report(records, model, prompt_version):
         "expenses": expenses,
         "accommodation": accommodation,
         "totals": {
+            "eur": aggregate(["currency"], euro=True),
+            "by_category_eur": aggregate(["currency", "category"], euro=True),
             "by_date": aggregate(["date", "currency"]),
             "by_category": by_category,
             "by_currency": by_currency,

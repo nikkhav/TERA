@@ -32,6 +32,18 @@ def reconcile(facts: ReceiptFacts):
             "Leistungszeitraum ist widersprüchlich.",
             ["service_start", "service_end"],
         )
+    if (
+        facts.category == Category.HOTEL
+        and facts.service_start
+        and facts.service_end
+        and facts.overnight_count is not None
+        and (facts.service_end - facts.service_start).days != facts.overnight_count
+    ):
+        issue(
+            "overnight_mismatch",
+            "Anzahl der Übernachtungen stimmt nicht mit An- und Abreise überein.",
+            ["overnight_count", "service_start", "service_end"],
+        )
     if facts.multiple_receipts:
         issue(
             "multiple_receipts", "Mehrere Belege in einer PDF; bitte getrennte PDFs verwenden.", []

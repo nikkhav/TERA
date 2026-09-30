@@ -352,3 +352,77 @@ def test_incomplete_extraction_cannot_be_manually_approved(api):
         f"/summary-jobs/{job_id}/documents/{doc_id}/review", json={"decision": "approved"}
     )
     assert response.status_code == 409
+
+
+def test_trip_can_be_edited_without_changing_documents_or_employee(api):
+    client, _, _ = api
+    tid = trip(client)
+    document = upload(client, tid).json()
+    original = client.get(f"/trips/{tid}").json()
+    response = client.put(
+        f"/trips/{tid}",
+        json={
+            "name": "Hamburg",
+            "starts_on": "2026-10-01",
+            "ends_on": "2026-10-04",
+        },
+    )
+    assert response.status_code == 200
+    updated = response.json()
+    assert updated["id"] == tid and updated["employee_id"] == original["employee_id"]
+    assert updated["name"] == "Hamburg" and updated["ends_on"] == "2026-10-04"
+    assert client.get(f"/trips/{tid}/documents").json()[0]["id"] == document["id"]
+    assert client.get(f"/employees/{original['employee_id']}/trips").json() == [updated]
+    assert client.put(f"/trips/{tid}", json={"name": " "}).status_code == 422
+    assert (
+        client.put(
+            f"/trips/{tid}",
+            json={"name": "Invalid", "starts_on": "2026-10-05", "ends_on": "2026-10-01"},
+        ).status_code
+        == 422
+    )
+    assert client.get(f"/trips/{tid}").json() == updated
+    cleared = client.put(
+        f"/trips/{tid}", json={"name": "Hamburg", "starts_on": None, "ends_on": None}
+    )
+    assert cleared.json()["starts_on"] is None
+    client.headers.pop("Authorization")
+    assert client.put(f"/trips/{tid}", json={"name": "Unauthorized"}).status_code == 401
+
+
+def test_manual_correction_validates_audits_and_recalculates(api):
+    client, factory, _ = api
+    tid = trip(client)
+    doc_id = upload(client, tid).json()["id"]
+    job_id = client.post(f"/trips/{tid}/summaries").json()["id"]
+    settings = Settings(_env_file=None)
+    process_job(factory, settings, *claim_job(factory, settings), extractor=FakeExtractor())
+    result_url = f"/summary-jobs/{job_id}/result"
+    url = f"/summary-jobs/{job_id}/documents/{doc_id}/correction"
+    before = client.get(result_url).json()["documents"][0]["facts"]
+    facts = {
+        **before,
+        "total": "100",
+        "breakfast_total": None,
+        "breakfast_net": None,
+        "breakfast_tax": None,
+        "items": [{"description": "Korrigierte Unterkunft", "category": "Hotel", "gross": "100"}],
+    }
+    invalid = client.put(url, json={"facts": {**facts, "total": "200"}})
+    assert invalid.status_code == 422
+    assert client.get(result_url).json()["documents"][0]["facts"] == before
+    response = client.put(url, json={"facts": facts, "comment": "Im Original geprüft"})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["totals"]["by_currency"][0]["confirmed"] == "100"
+    assert result["totals"]["eur"][0]["confirmed"] == "100.00"
+    assert result["documents"][0]["status"] == "approved"
+    event = result["documents"][0]["correction_history"][0]
+    assert event["before"]["total"] == before["total"]
+    assert event["after"]["total"] == "100"
+    assert event["user_name"] == "Test User"
+    assert client.get(result_url).json() == result
+    reset = client.put(url.replace("/correction", "/review"), json={"decision": "pending"}).json()
+    assert reset["documents"][0]["status"] == "needs_review"
+    client.headers.pop("Authorization")
+    assert client.put(url, json={"facts": facts}).status_code == 401

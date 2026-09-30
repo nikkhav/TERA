@@ -18,6 +18,12 @@ export function CategoryCard({ row }: { row: CategoryTotal }) {
       <p className="mt-1 text-lg font-bold tracking-tight">
         {formatMoney(row.confirmed, row.currency)}
       </p>
+      {row.unknown_amounts > 0 && (
+        <p className="mt-1 text-xs text-amber-700">
+          {row.unknown_amounts} ohne Betrag in{" "}
+          {row.currency ?? "bekannter Währung"}
+        </p>
+      )}
       {Number(row.in_review) !== 0 && (
         <p className="mt-1 text-xs font-semibold text-amber-700">
           {formatMoney(row.in_review, row.currency)} in Prüfung

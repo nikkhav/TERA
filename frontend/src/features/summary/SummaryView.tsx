@@ -14,10 +14,27 @@ export function SummaryView({ summary }: { summary: Summary }) {
   const [tab, setTab] = useState<"overview" | "expenses" | "review">(
     "overview",
   );
+  const [editing, setEditing] = useState(false);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const reviewDocument = summary.documents.find(
     (document) => document.document_id === reviewId,
   );
+  const reviewGroups = summary.documents
+    .map((document) => ({
+      document,
+      warnings: [
+        ...new Set(
+          summary.warnings
+            .filter((w) => w.document_id === document.document_id)
+            .map((w) => w.message),
+        ),
+      ],
+    }))
+    .filter((group) => group.warnings.length > 0);
+  const openReview = (id: string) => {
+    setEditing(false);
+    setReviewId(id);
+  };
   return (
     <section className="space-y-5">
       {reviewDocument && (
@@ -25,6 +42,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
           key={reviewDocument.document_id}
           summary={summary}
           document={reviewDocument}
+          initiallyEditing={editing}
           onClose={() => setReviewId(null)}
         />
       )}
@@ -50,16 +68,22 @@ export function SummaryView({ summary }: { summary: Summary }) {
             <h2 className="text-xl font-bold tracking-tight">Auswertung</h2>
           </div>
         </div>
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {summary.totals.by_currency.map((total) => (
+        <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))] gap-3">
+          {[
+            ...(summary.totals.eur ?? []),
+            ...summary.totals.by_currency.filter(
+              (total) => total.currency !== "EUR",
+            ),
+          ].map((total) => (
             <div
               key={total.currency ?? "unknown"}
               className="rounded-2xl bg-ink p-5 text-white"
             >
               <p className="text-xs font-semibold text-zinc-400">
-                Gesamtsumme · {total.currency ?? "ohne Währung"}
+                {total.unknown_amounts > 0 ? "Teilsumme" : "Gesamtsumme"} ·{" "}
+                {total.currency ?? "ohne Währung"}
               </p>
-              <p className="mt-2 text-3xl font-bold tracking-tight">
+              <p className="mt-2 text-2xl font-bold tracking-tight">
                 {formatMoney(total.confirmed, total.currency)}
               </p>
               {Number(total.excluded || 0) !== 0 && (
@@ -82,13 +106,13 @@ export function SummaryView({ summary }: { summary: Summary }) {
           )}
         </div>
       </div>
-      <ReceiptNotices notices={summary.notices ?? []} onReview={setReviewId} />
+      <ReceiptNotices notices={summary.notices ?? []} onReview={openReview} />
       <div className="flex gap-1 overflow-x-auto rounded-xl bg-zinc-200/60 p-1 sm:w-fit">
         {(
           [
             ["overview", "Übersicht"],
             ["expenses", `Ausgaben (${summary.expenses.length})`],
-            ["review", `Prüfung (${summary.warnings.length})`],
+            ["review", `Prüfung (${reviewGroups.length} Belege)`],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -106,46 +130,63 @@ export function SummaryView({ summary }: { summary: Summary }) {
         ))}
       </div>
       {tab === "overview" && (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {summary.totals.by_category.map((row) => (
-            <CategoryCard key={`${row.currency}-${row.category}`} row={row} />
-          ))}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,180px),1fr))] gap-3">
+          {(summary.totals.by_category_eur ?? summary.totals.by_category).map(
+            (row) => (
+              <CategoryCard key={`${row.currency}-${row.category}`} row={row} />
+            ),
+          )}
         </div>
       )}
       {tab === "expenses" && (
-        <ExpenseTable expenses={summary.expenses} onReview={setReviewId} />
+        <ExpenseTable
+          expenses={summary.expenses}
+          onReview={openReview}
+          onEdit={(id) => {
+            setEditing(true);
+            setReviewId(id);
+          }}
+        />
       )}
       {tab === "review" && (
         <div className="card overflow-hidden">
-          {summary.warnings.length ? (
-            <ul className="max-h-[min(65vh,640px)] divide-y divide-line overflow-y-auto">
-              {summary.warnings.map((warning, index) => (
-                <li
-                  key={`${warning.document_id}-${index}`}
-                  className="flex gap-3 p-4 sm:p-5"
-                >
-                  <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-700">
-                    <AlertCircle size={16} />
-                  </span>
-                  <div>
-                    <p className="text-sm leading-6 text-zinc-700">
-                      {warning.message}
-                    </p>
-                    <button
-                      className="mt-1.5 text-xs text-moss-700 underline underline-offset-2"
-                      onClick={() => setReviewId(warning.document_id)}
-                    >
-                      {warning.filename ||
-                        summary.documents.find(
-                          (document) =>
-                            document.document_id === warning.document_id,
-                        )?.filename ||
-                        "Beleg prüfen"}
-                    </button>
+          {reviewGroups.length ? (
+            <div className="divide-y divide-line">
+              {reviewGroups.map(({ document, warnings }) => (
+                <div key={document.document_id} className="p-5">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-semibold">
+                      {document.filename}{" "}
+                      <span className="text-xs text-zinc-500">
+                        · {warnings.length} Hinweise
+                      </span>
+                    </h3>
+                    <div className="flex gap-3 text-sm text-moss-700">
+                      <button
+                        className="focus-ring underline"
+                        onClick={() => openReview(document.document_id)}
+                      >
+                        Prüfen / bestätigen
+                      </button>
+                      <button
+                        className="focus-ring underline"
+                        onClick={() => {
+                          setEditing(true);
+                          setReviewId(document.document_id);
+                        }}
+                      >
+                        Bearbeiten
+                      </button>
+                    </div>
                   </div>
-                </li>
+                  <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-zinc-700">
+                    {warnings.map((message, index) => (
+                      <li key={index}>{message}</li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
+            </div>
           ) : (
             <EmptyState icon={Check} title="Keine Auffälligkeiten" />
           )}

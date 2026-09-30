@@ -37,14 +37,13 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_budgets(self):
-        if (
-            self.app_environment == "production"
-            and (
-                self.auth_secret_key == "development-secret-change-before-production"
-                or len(self.auth_secret_key.encode()) < 32
-            )
+        if self.app_environment == "production" and (
+            self.auth_secret_key == "development-secret-change-before-production"
+            or len(self.auth_secret_key.encode()) < 32
         ):
-            raise ValueError("Set AUTH_SECRET_KEY to at least 32 bytes before running in production")
+            raise ValueError(
+                "Set AUTH_SECRET_KEY to at least 32 bytes before running in production"
+            )
         if self.model_context_tokens - self.model_output_tokens < 3072:
             raise ValueError("Reserve at least 3072 tokens for instructions and PDF text")
         if self.job_lease_seconds <= self.model_timeout_seconds + 60:

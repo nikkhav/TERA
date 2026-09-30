@@ -1,5 +1,6 @@
 import { AlertCircle, LoaderCircle } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { type FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { authApi } from "../../shared/api/auth";
 import { errorMessage } from "../../shared/api/client";
@@ -9,19 +10,18 @@ import { useAuth } from "./auth-context";
 export function AuthPage() {
   const { user, login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  const registration = useQuery({
+    queryKey: ["auth", "registration"],
+    queryFn: authApi.registration,
+    retry: 1,
+  });
+  const registrationEnabled = registration.data?.enabled === true;
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    authApi
-      .registration()
-      .then(({ enabled }) => setRegistrationEnabled(enabled))
-      .catch(() => undefined);
-  }, []);
   if (user) return <Navigate to="/" replace />;
 
   async function submit(event: FormEvent) {
@@ -120,6 +120,22 @@ export function AuthPage() {
               {mode === "login" ? "Anmelden" : "Konto erstellen"}
             </Button>
           </form>
+          {registration.isError && (
+            <div role="alert" className="mt-5 text-sm text-red-800">
+              <p>
+                Die Registrierung konnte nicht geladen werden. Bitte versuche es
+                erneut.
+              </p>
+              <button
+                type="button"
+                className="focus-ring mt-2 underline"
+                disabled={registration.isFetching}
+                onClick={() => void registration.refetch()}
+              >
+                Erneut versuchen
+              </button>
+            </div>
+          )}
           {registrationEnabled && (
             <p className="mt-6 text-center text-sm text-zinc-500">
               {mode === "login" ? "Noch kein Konto?" : "Bereits registriert?"}

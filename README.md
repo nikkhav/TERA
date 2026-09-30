@@ -198,7 +198,9 @@ React Query owns server state, polling, cache invalidation, and loading states. 
 
 `research/prototype.ipynb` compares models against synthetic English and Chinese invoices. Research prompts and its Markdown template remain separate from the application's extraction prompt and deterministic report renderer. Historical results are in `research/results/`.
 
-`currency_exchange.py` is a standalone conversion utility. It is not connected to the reporting pipeline or an external rate provider.
+`tera/currency_exchange.py` performs decimal arithmetic; `currency_exchange.py` re-exports
+it for existing notebooks. `tera/exchange_rates.py` obtains historical CNY/EUR and
+other currency/EUR rates from the Bankenverband calculator.
 
 Run the tests:
 
@@ -218,15 +220,17 @@ The integration test uses an isolated database schema and storage bucket, remove
 
 ## Manual receipt review
 
-In **Ausgaben**, click the PDF filename to review the receipt. The dialog shows its
+In **Ausgaben** or **Prüfung**, choose **Prüfen / bestätigen** to review a receipt. The dialog shows its
 expenses, source quotations, automatic findings, and a PDF download. **Geprüft und
 bestätigt** confirms all expenses from that receipt. **Ablehnen** excludes those
 amounts from confirmed totals; rejected amounts remain visible separately.
 **Prüfung zurücksetzen** restores the automatic assessment. Missing amounts or
-currencies cannot be approved until extraction succeeds.
+currencies must first be supplied using **Bearbeiten**. **Speichern und bestätigen**
+validates the corrected totals and records your confirmation. Add/remove positions
+and edit their descriptions, categories, amounts and travel details in this form.
 
 Decisions are stored for that particular report with the signed-in user's name,
-time, and optional comment. Original extraction findings are preserved. JSON,
+time, and optional comment. Original extraction findings are preserved. JSON
 and category totals reflect the current decision and include its audit
 history. A newly generated report requires its own review.
 
@@ -240,3 +244,35 @@ validation issues: they do not trigger a correction request, change the report
 status, or remove amounts from confirmed totals. They remain visible after manual
 review. The API exposes them as `notices` at report
 and document level.
+
+
+## Currency conversion and German presentation
+
+Foreign expenses retain their original amount and also show an EUR equivalent.
+The rate date is the invoice issue date, not the travel date. The report saves the
+rate, its actual source date, and a link to the [Bankenverband calculator](https://bankenverband.de/services/waehrungsrechner).
+Rates are interbank reference rates supplied there by CurrencyLayer; card fees are
+not included. Each expense is rounded to EUR cents before totals are summed.
+Totals separate confirmed, pending and rejected amounts, in both EUR and original
+currencies. A missing conversion is explicitly marked and never treated as zero.
+
+The adapter uses the calculator's publicly accessible `/api/converter/convert`
+endpoint. This is not a documented third-party API with a contractual availability
+guarantee. Confirm the provider's usage terms before production use and monitor
+failures. Requests send only currency codes, a date and amount 1; no document text or
+personal data. Historical rates are cached in the worker and saved with each report.
+Today/future dates and unavailable currencies remain unconverted; correcting the
+invoice date or generating a new report retries conversion. A same-date correction
+reuses its saved rate so results stay reproducible.
+
+Extraction prioritizes hotel nights, meals, transport, distances, routes and prices.
+Printed net/tax amounts can be combined deterministically; missing tax breakdowns
+alone do not invalidate a final hotel price. All model text gets a separate German
+translation pass without changing amounts or source quotations. Original labels
+remain available in the review dialog. Translation failures are logged and marked
+for review rather than presenting untranslated text as a finished result.
+
+`PUT /summary-jobs/{job_id}/documents/{document_id}/correction` accepts `facts` using
+the receipt contract and an optional `comment`. It validates arithmetic, stores the
+before/after values and signed-in reviewer, updates currency conversion if needed,
+and confirms the corrected receipt. New report generations never inherit decisions.

@@ -155,6 +155,13 @@ class ReceiptFacts(BaseModel):
     invoice_date: date | None = None
     service_start: date | None = None
     service_end: date | None = None
+    overnight_count: int | None = Field(default=None, ge=0)
+    room_count: int | None = Field(default=None, ge=1)
+    transport_mode: str | None = Field(default=None, max_length=100)
+    distance_km: Money | None = Field(default=None, ge=0)
+    origin: str | None = Field(default=None, max_length=200)
+    destination: str | None = Field(default=None, max_length=200)
+    flight_number: str | None = Field(default=None, max_length=100)
     category: Category | None = None
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     total: Money | None = None
@@ -193,6 +200,11 @@ class ReviewInput(BaseModel):
     comment: str = Field(default="", max_length=2000)
 
 
+class CorrectionInput(BaseModel):
+    facts: ReceiptFacts
+    comment: str = Field(default="", max_length=2000)
+
+
 class ReviewEvent(ReviewInput):
     user_id: str
     user_name: str
@@ -216,6 +228,9 @@ class DocumentResult(BaseModel):
     initial_issues: list[ValidationIssue] = Field(default_factory=list)
     derived_fields: list[str] = Field(default_factory=list)
     review_history: list[ReviewEvent] = Field(default_factory=list)
+    correction_history: list[dict] = Field(default_factory=list)
+    original_texts: dict = Field(default_factory=dict)
+    exchange_rate: dict | None = None
 
 
 class ExpenseBase(BaseModel):
@@ -231,6 +246,8 @@ class ExpenseBase(BaseModel):
 
 
 class Expense(ExpenseBase):
+    amount_eur: str | None = None
+    exchange_rate: dict | None = None
     category: Category
     description: str
     amount: str | None
@@ -259,6 +276,8 @@ class CategoryTotal(CurrencyTotal):
 
 
 class Totals(BaseModel):
+    eur: list[CurrencyTotal] = Field(default_factory=list)
+    by_category_eur: list[CategoryTotal] = Field(default_factory=list)
     by_currency: list[CurrencyTotal]
     by_date: list[DateTotal]
     by_category: list[CategoryTotal]

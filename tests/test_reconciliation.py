@@ -74,7 +74,7 @@ def test_two_tax_rates_and_exempt_city_tax_reconcile():
         "Sonstige Ausgaben": "0",
     }
     assert report["accommodation"][0]["without_breakfast"] == "641.20"
-    assert report["schema_version"] == 2
+    assert report["schema_version"] == 3
 
 
 @pytest.mark.parametrize(

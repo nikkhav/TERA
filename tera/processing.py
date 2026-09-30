@@ -14,7 +14,10 @@ def correction_feedback(issues):
     limit = RECHECK_RESERVE - len(RECHECK_PROMPT.encode()) - 2
     lines = []
     for issue in issues:
-        line = f"{issue['code']}: {issue['message']}"
+        fields = ", ".join(issue.get("fields", []))
+        line = (
+            f"{issue['code']}: {fields or 'verify all monetary quotations and uncertain readings'}"
+        )
         candidate = "\n".join(lines + [line])
         if len(candidate.encode()) <= limit:
             lines.append(line)
@@ -63,9 +66,7 @@ def process_document(document, chunks, extractor, settings, progress, job_id=Non
                 pages,
                 time.monotonic() - started,
             )
-            errors[index] = (
-                f"Extraktion fehlgeschlagen, Seiten {pages}. Bitte erneut versuchen."
-            )
+            errors[index] = f"Extraktion fehlgeschlagen, Seiten {pages}. Bitte erneut versuchen."
         except Exception:
             logger.exception(
                 "extraction_failed job_id=%s document_id=%s chunk=%s pages=%s "
@@ -76,9 +77,7 @@ def process_document(document, chunks, extractor, settings, progress, job_id=Non
                 pages,
                 time.monotonic() - started,
             )
-            errors[index] = (
-                f"Extraktion fehlgeschlagen, Seiten {pages}. Bitte erneut versuchen."
-            )
+            errors[index] = f"Extraktion fehlgeschlagen, Seiten {pages}. Bitte erneut versuchen."
         progress(completed=1)
 
     for index in range(len(chunks)):

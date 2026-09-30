@@ -20,13 +20,16 @@ from tera.auth import (
     hash_password,
 )
 from tera.config import get_settings
+from tera.corrections import corrected_record
 from tera.db import get_session
+from tera.exchange_rates import attach_rate
 from tera.models import Document, Employee, SummaryJob, Trip, User, new_id, now
 from tera.pdf import extract_pages
 from tera.prompts import PROMPT_VERSION
 from tera.reporting import make_report
 from tera.schemas import (
     AuthResponse,
+    CorrectionInput,
     DocumentOut,
     EmployeeCreate,
     EmployeeOut,
@@ -162,6 +165,15 @@ def list_trips(employee_id: UUID, session: DB, limit: Limit = 100, offset: Offse
         .offset(offset)
         .limit(limit)
     ).all()
+
+
+@protected.put("/trips/{trip_id}", response_model=TripOut)
+def update_trip(trip_id: UUID, body: TripCreate, session: DB):
+    trip = lock_trip(session, trip_id)
+    for field, value in body.model_dump().items():
+        setattr(trip, field, value)
+    session.commit()
+    return trip
 
 
 @protected.get("/trips/{trip_id}", response_model=TripOut)
@@ -369,6 +381,38 @@ def review_document(
         document_id,
         user.id,
         body.decision,
+    )
+    return result_for_job(job_id, session)
+
+
+@protected.put(
+    "/summary-jobs/{job_id}/documents/{document_id}/correction", response_model=SummaryResult
+)
+def correct_document(
+    job_id: UUID, document_id: UUID, body: CorrectionInput, session: DB, user: CurrentUser
+):
+    job = session.scalar(select(SummaryJob).where(SummaryJob.id == str(job_id)).with_for_update())
+    if job is None:
+        raise HTTPException(404, "Auswertung nicht gefunden.")
+    if job.status in {"queued", "running"} or job.result is None:
+        raise HTTPException(409, "Die Auswertung ist noch nicht abgeschlossen.")
+    result = deepcopy(job.result)
+    records = result["documents"]
+    index = next((i for i, r in enumerate(records) if r["document_id"] == str(document_id)), None)
+    if index is None:
+        raise HTTPException(404, "Beleg gehört nicht zu dieser Auswertung.")
+    try:
+        records[index] = corrected_record(
+            records[index], body.facts, user.id, user.display_name, now().isoformat(), body.comment
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    attach_rate(records[index])
+    job.result = make_report(records, result["model"], result["prompt_version"])
+    job.status = "needs_review" if job.result["coverage"]["needs_review"] else "completed"
+    session.commit()
+    logger.info(
+        "document_corrected job_id=%s document_id=%s user_id=%s", job.id, document_id, user.id
     )
     return result_for_job(job_id, session)
 

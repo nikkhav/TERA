@@ -6,6 +6,8 @@ export type TripInput = Pick<Trip, "name" | "starts_on" | "ends_on">;
 
 export const tripsApi = {
   list: (employeeId: string) => listAll<Trip>(`/employees/${employeeId}/trips`),
+  update: async (tripId: string, input: TripInput) =>
+    (await apiClient.put<Trip>(`/trips/${tripId}`, input)).data,
   create: async (employeeId: string, input: TripInput) =>
     (await apiClient.post<Trip>(`/employees/${employeeId}/trips`, input)).data,
 };

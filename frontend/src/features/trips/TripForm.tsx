@@ -1,3 +1,4 @@
+import { errorMessage } from "../../shared/api/client";
 import { LoaderCircle } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import type { TripInput } from "../../shared/api/trips";
@@ -6,17 +7,21 @@ import { Button } from "../../shared/ui/Button";
 export function TripForm({
   onSave,
   onClose,
+  initialValues,
 }: {
   onSave: (values: TripInput) => Promise<void>;
   onClose: () => void;
+  initialValues?: TripInput;
 }) {
-  const [name, setName] = useState("");
-  const [startsOn, setStartsOn] = useState("");
-  const [endsOn, setEndsOn] = useState("");
+  const [name, setName] = useState(initialValues?.name ?? "");
+  const [startsOn, setStartsOn] = useState(initialValues?.starts_on ?? "");
+  const [endsOn, setEndsOn] = useState(initialValues?.ends_on ?? "");
+  const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
+    setError("");
     setSaving(true);
     try {
       await onSave({
@@ -25,6 +30,8 @@ export function TripForm({
         ends_on: endsOn || null,
       });
       onClose();
+    } catch (error) {
+      setError(errorMessage(error));
     } finally {
       setSaving(false);
     }
@@ -72,6 +79,11 @@ export function TripForm({
           />
         </div>
       </div>
+      {error && (
+        <p role="alert" className="text-sm text-red-700">
+          {error}
+        </p>
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onClose}>
           Abbrechen
@@ -83,8 +95,8 @@ export function TripForm({
             (!!startsOn && !!endsOn && startsOn > endsOn)
           }
         >
-          {saving && <LoaderCircle size={16} className="animate-spin" />}Reise
-          anlegen
+          {saving && <LoaderCircle size={16} className="animate-spin" />}
+          {initialValues ? "Änderungen speichern" : "Reise anlegen"}
         </Button>
       </div>
     </form>

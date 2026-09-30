@@ -44,10 +44,14 @@ class OllamaExtractor:
         prompt = build_prompt(document_id, pages, feedback)
         if len(prompt.encode()) > prompt_budget(self.settings):
             raise NonRetryableExtractionError("Input exceeds the configured context budget")
+        schema = ReceiptFacts.model_json_schema()
+        for object_schema in [schema, *schema.get("$defs", {}).values()]:
+            if "properties" in object_schema:
+                object_schema["required"] = list(object_schema["properties"])
         payload = {
             "model": self.model,
             "prompt": prompt,
-            "format": ReceiptFacts.model_json_schema(),
+            "format": schema,
             "stream": False,
             "options": {
                 "temperature": 0,
@@ -133,6 +137,15 @@ def verify_facts(facts: ReceiptFacts, pages: list[dict]) -> ReceiptFacts:
             e.field == field and contains_amount(e.quote, value) for e in owner.evidence
         )
 
+    # Recheck responses sometimes echo our previous evidence messages verbatim.
+    # Remove only messages whose specific monetary claims are now verified below.
+    echoed = []
+    for note in facts.notes:
+        match = re.fullmatch(
+            r"Position (\d+) \(.+\): (.+) nicht eindeutig im Beleg nachgewiesen\.", note
+        )
+        if match and 0 < int(match[1]) <= len(facts.items):
+            echoed.append((note, int(match[1]) - 1, match[2].split(", ")))
     for index, item in enumerate(facts.items):
         item.evidence = verify(item.evidence, index)
         # A model-calculated tax has no literal quote. Derive it later from verified amounts.
@@ -145,6 +158,25 @@ def verify_facts(facts: ReceiptFacts, pages: list[dict]) -> ReceiptFacts:
         ):
             item.tax = None
             item.evidence = [e for e in item.evidence if e.field != "tax"]
+        if (
+            item.gross is not None
+            and not supported(item, "gross")
+            and supported(item, "net")
+            and supported(item, "tax")
+            and item.gross == item.net + item.tax
+        ):
+            item.gross = None
+            item.evidence = [e for e in item.evidence if e.field != "gross"]
+        resolved = {
+            FIELD_LABELS[field] for field in ("net", "tax", "gross") if supported(item, field)
+        }
+        if supported(item, "net") and supported(item, "tax"):
+            resolved.add(FIELD_LABELS["gross"])
+        if supported(item, "net") and supported(item, "gross"):
+            resolved.add(FIELD_LABELS["tax"])
+        for note, item_index, labels in echoed:
+            if item_index == index and set(labels) <= resolved and note in facts.notes:
+                facts.notes.remove(note)
         missing = [
             FIELD_LABELS[field]
             for field in ("net", "tax", "gross")
