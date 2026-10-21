@@ -6,11 +6,13 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  expanded = false,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  expanded?: boolean;
 }) {
   useEffect(() => {
     const close = (event: KeyboardEvent) => event.key === "Escape" && onClose();
@@ -26,11 +28,11 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`card max-h-[90vh] w-full overflow-y-auto p-6 ${wide ? "max-w-3xl" : "max-w-md"}`}
+        className={`card max-h-[90vh] w-full overflow-y-auto p-6 ${expanded ? "max-w-7xl" : wide ? "max-w-3xl" : "max-w-md"}`}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-lg font-bold">{title}</h2>
+          <h2 className="min-w-0 break-words text-lg font-bold">{title}</h2>
           <button
             className="focus-ring rounded-lg p-2 text-zinc-500 hover:bg-zinc-100"
             onClick={onClose}

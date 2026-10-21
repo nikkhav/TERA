@@ -1,14 +1,24 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 
 class Category(str, Enum):
     HOTEL = "Hotel"
     FLIGHTS = "Flugreisen"
+    TRANSPORT = "Transport"
     MEALS = "Verpflegung"
     OTHER = "Sonstige Ausgaben"
 
@@ -110,18 +120,29 @@ class JobOut(BaseModel):
     model: str
     prompt_version: str
     attempts: int
+    completed_documents: int = 0
+    reused_documents: int = 0
     completed_chunks: int
     total_chunks: int
     error: str | None
     created_at: datetime
     finished_at: datetime | None
+    started_at: datetime | None = None
+
+    @field_serializer("created_at", "started_at", "finished_at")
+    def utc_timestamp(self, value):
+        # SQLite returns naive UTC values; browsers must not interpret them as local time.
+        return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
 
 
 class Evidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
     page: int = Field(ge=1)
-    quote: str = Field(min_length=1, max_length=1000)
+    quote: str = Field(default="", max_length=1000)
     field: str | None = Field(default=None, max_length=100)
+    block_id: str | None = Field(default=None, max_length=100)
+    start: int | None = Field(default=None, ge=0)
+    end: int | None = Field(default=None, ge=1)
 
 
 Money = Annotated[Decimal, Field(max_digits=18, decimal_places=6, allow_inf_nan=False)]
@@ -150,6 +171,12 @@ class ReceiptFacts(BaseModel):
     """Structured extraction contract and internal validation."""
 
     model_config = ConfigDict(extra="forbid")
+    _evidence_checked: bool = PrivateAttr(default=False)
+    document_kind: (
+        Literal["invoice", "receipt", "payment", "booking", "supporting", "unknown"] | None
+    ) = None
+    service_reference: str | None = Field(default=None, max_length=200)
+    service_time: str | None = Field(default=None, max_length=10)
     merchant: str | None = Field(default=None, max_length=500)
     invoice_number: str | None = Field(default=None, max_length=200)
     invoice_date: date | None = None
@@ -162,6 +189,7 @@ class ReceiptFacts(BaseModel):
     origin: str | None = Field(default=None, max_length=200)
     destination: str | None = Field(default=None, max_length=200)
     flight_number: str | None = Field(default=None, max_length=100)
+    flight_route: str | None = Field(default=None, max_length=500)
     category: Category | None = None
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     total: Money | None = None
@@ -186,6 +214,7 @@ class Coverage(BaseModel):
 
 class Source(Evidence):
     document_id: str
+    translation: str | None = None
 
 
 class ValidationIssue(BaseModel):
@@ -203,6 +232,12 @@ class ReviewInput(BaseModel):
 class CorrectionInput(BaseModel):
     facts: ReceiptFacts
     comment: str = Field(default="", max_length=2000)
+
+
+class RelationshipInput(BaseModel):
+    document_ids: list[UUID] = Field(min_length=2, max_length=20)
+    resolution: Literal["same_expense", "separate", "pending"]
+    primary_document_id: UUID | None = None
 
 
 class ReviewEvent(ReviewInput):
@@ -229,6 +264,9 @@ class DocumentResult(BaseModel):
     derived_fields: list[str] = Field(default_factory=list)
     review_history: list[ReviewEvent] = Field(default_factory=list)
     correction_history: list[dict] = Field(default_factory=list)
+    related_document_ids: list[str] = Field(default_factory=list)
+    duplicate_of: str | None = None
+    relationship_history: list[dict] = Field(default_factory=list)
     original_texts: dict = Field(default_factory=dict)
     exchange_rate: dict | None = None
 

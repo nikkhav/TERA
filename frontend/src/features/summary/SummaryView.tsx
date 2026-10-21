@@ -1,3 +1,11 @@
+import { RelationshipDialog } from "./RelationshipDialog";
+import {
+  duplicateWarning,
+  expenseRows,
+  reviewTasks,
+  relatedGroup,
+} from "./groups";
+import { documentKinds, reviewSummary } from "./review";
 import { ReceiptNotices } from "./ReceiptNotices";
 import { ReviewDialog } from "./ReviewDialog";
 import { AlertCircle, Check } from "lucide-react";
@@ -14,29 +22,30 @@ export function SummaryView({ summary }: { summary: Summary }) {
   const [tab, setTab] = useState<"overview" | "expenses" | "review">(
     "overview",
   );
+  const [comparisonIds, setComparisonIds] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const reviewDocument = summary.documents.find(
     (document) => document.document_id === reviewId,
   );
-  const reviewGroups = summary.documents
-    .map((document) => ({
-      document,
-      warnings: [
-        ...new Set(
-          summary.warnings
-            .filter((w) => w.document_id === document.document_id)
-            .map((w) => w.message),
-        ),
-      ],
-    }))
-    .filter((group) => group.warnings.length > 0);
+  const reviewGroups = reviewTasks(summary);
   const openReview = (id: string) => {
+    setComparisonIds([]);
     setEditing(false);
     setReviewId(id);
   };
   return (
     <section className="space-y-5">
+      {comparisonIds.length > 1 && (
+        <RelationshipDialog
+          summary={summary}
+          documents={summary.documents.filter((d) =>
+            comparisonIds.includes(d.document_id),
+          )}
+          onClose={() => setComparisonIds([])}
+          onOpenDocument={openReview}
+        />
+      )}
       {reviewDocument && (
         <ReviewDialog
           key={reviewDocument.document_id}
@@ -44,14 +53,23 @@ export function SummaryView({ summary }: { summary: Summary }) {
           document={reviewDocument}
           initiallyEditing={editing}
           onClose={() => setReviewId(null)}
+          onOpenDocument={openReview}
+          onCompare={() => {
+            setComparisonIds(
+              relatedGroup(summary, reviewDocument.document_id).map(
+                (d) => d.document_id,
+              ),
+            );
+            setReviewId(null);
+          }}
         />
       )}
       {summary.is_stale && (
         <div className="flex gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <AlertCircle className="mt-0.5 shrink-0" size={18} />
           <span>
-            Seit dieser Auswertung wurden weitere Belege hinzugefügt. Erstelle
-            eine neue Auswertung, um sie einzubeziehen.
+            Die Belege dieser Reise haben sich geändert. Erstelle eine neue
+            Auswertung, um die aktuellen Dokumente zu berücksichtigen.
           </span>
         </div>
       )}
@@ -107,12 +125,51 @@ export function SummaryView({ summary }: { summary: Summary }) {
         </div>
       </div>
       <ReceiptNotices notices={summary.notices ?? []} onReview={openReview} />
+      {summary.documents.some(
+        (document) =>
+          document.duplicate_of ||
+          ["payment", "booking", "supporting"].includes(
+            document.facts.document_kind ?? "",
+          ),
+      ) && (
+        <details className="card p-5 text-sm">
+          <summary className="cursor-pointer font-semibold">
+            Weitere Nachweise · nicht zusätzlich summiert
+          </summary>
+          <ul className="mt-3 space-y-2">
+            {summary.documents
+              .filter(
+                (document) =>
+                  document.duplicate_of ||
+                  ["payment", "booking", "supporting"].includes(
+                    document.facts.document_kind ?? "",
+                  ),
+              )
+              .map((document) => (
+                <li key={document.document_id}>
+                  <button
+                    className="text-moss-700 underline"
+                    onClick={() => openReview(document.document_id)}
+                  >
+                    {document.filename}
+                  </button>
+                  <span className="ml-2 text-zinc-500">
+                    {documentKinds[document.facts.document_kind ?? "unknown"]}
+                    {document.duplicate_of
+                      ? " · zusätzlicher Nachweis derselben Ausgabe"
+                      : ""}
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </details>
+      )}
       <div className="flex gap-1 overflow-x-auto rounded-xl bg-zinc-200/60 p-1 sm:w-fit">
         {(
           [
             ["overview", "Übersicht"],
-            ["expenses", `Ausgaben (${summary.expenses.length})`],
-            ["review", `Prüfung (${reviewGroups.length} Belege)`],
+            ["expenses", `Ausgaben (${expenseRows(summary).length})`],
+            ["review", `Prüfung (${reviewGroups.length})`],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -140,52 +197,106 @@ export function SummaryView({ summary }: { summary: Summary }) {
       )}
       {tab === "expenses" && (
         <ExpenseTable
-          expenses={summary.expenses}
+          summary={summary}
           onReview={openReview}
-          onEdit={(id) => {
-            setEditing(true);
-            setReviewId(id);
-          }}
+          onCompare={(ids) => setComparisonIds(ids)}
         />
       )}
       {tab === "review" && (
         <div className="card overflow-hidden">
           {reviewGroups.length ? (
             <div className="divide-y divide-line">
-              {reviewGroups.map(({ document, warnings }) => (
-                <div key={document.document_id} className="p-5">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-                    <h3 className="font-semibold">
-                      {document.filename}{" "}
-                      <span className="text-xs text-zinc-500">
-                        · {warnings.length} Hinweise
-                      </span>
-                    </h3>
-                    <div className="flex gap-3 text-sm text-moss-700">
-                      <button
-                        className="focus-ring underline"
-                        onClick={() => openReview(document.document_id)}
-                      >
-                        Prüfen / bestätigen
-                      </button>
-                      <button
-                        className="focus-ring underline"
-                        onClick={() => {
-                          setEditing(true);
-                          setReviewId(document.document_id);
-                        }}
-                      >
-                        Bearbeiten
-                      </button>
+              {reviewGroups.map(({ documents, isRelationship }) => {
+                const document = documents[0];
+                const warnings = reviewSummary(document);
+                return (
+                  <div key={document.document_id} className="p-5">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <h3 className="font-semibold">
+                        {isRelationship
+                          ? "Möglicherweise eine gemeinsame Ausgabe"
+                          : (document.facts.merchant ?? "Beleg prüfen")}{" "}
+                        <span className="text-xs text-zinc-500">
+                          ·{" "}
+                          {isRelationship
+                            ? `${documents.length} Belege`
+                            : `${warnings.length} Hinweise`}
+                        </span>
+                      </h3>
+                      <div className="flex gap-3 text-sm text-moss-700">
+                        <button
+                          className="focus-ring underline"
+                          onClick={() =>
+                            isRelationship
+                              ? setComparisonIds(
+                                  documents.map((d) => d.document_id),
+                                )
+                              : openReview(document.document_id)
+                          }
+                        >
+                          {isRelationship
+                            ? "Belege vergleichen"
+                            : "Beleg prüfen"}
+                        </button>
+                        {!isRelationship && (
+                          <button
+                            className="focus-ring underline"
+                            onClick={() => {
+                              setEditing(true);
+                              setReviewId(document.document_id);
+                            }}
+                          >
+                            Bearbeiten
+                          </button>
+                        )}
+                      </div>
                     </div>
+                    {isRelationship && (
+                      <p className="mb-3 text-sm text-zinc-600">
+                        {document.facts.merchant ?? "Anbieter unbekannt"} ·{" "}
+                        {new Set(
+                          documents.map(
+                            (d) =>
+                              `${d.facts.currency}:${Number(d.facts.total)}`,
+                          ),
+                        ).size === 1
+                          ? `${formatMoney(document.facts.total, document.facts.currency)} je Beleg`
+                          : "Unterschiedliche Beträge oder Währungen"}
+                        . Belege könnten dieselbe Ausgabe betreffen.
+                      </p>
+                    )}
+                    {!isRelationship && (
+                      <>
+                        <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-zinc-700">
+                          {warnings.map((message, index) => (
+                            <li key={index}>{message}</li>
+                          ))}
+                        </ul>
+                        <details className="mt-3 text-sm text-zinc-500">
+                          <summary className="cursor-pointer">
+                            Details ({document.warnings.length})
+                          </summary>
+                          <ul className="mt-2 list-disc space-y-1 pl-5">
+                            {document.warnings
+                              .filter((text) => !/^[a-z_]+:\s/.test(text))
+                              .map((text, index) => (
+                                <li key={index}>{text}</li>
+                              ))}
+                          </ul>
+                        </details>
+                      </>
+                    )}
+                    {isRelationship &&
+                      documents.some((d) =>
+                        d.warnings.some((w) => !duplicateWarning(w)),
+                      ) && (
+                        <p className="mt-2 text-xs text-amber-800">
+                          Weitere Prüfpunkte werden im Vergleich angezeigt.
+                        </p>
+                      )}
                   </div>
-                  <ul className="list-disc space-y-2 pl-5 text-sm leading-6 text-zinc-700">
-                    {warnings.map((message, index) => (
-                      <li key={index}>{message}</li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <EmptyState icon={Check} title="Keine Auffälligkeiten" />

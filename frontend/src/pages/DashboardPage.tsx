@@ -31,6 +31,7 @@ import { EmployeeOverview } from "../features/employees/EmployeeOverview";
 import { EmployeeSidebar } from "../features/employees/EmployeeSidebar";
 import { useAuth } from "../features/auth/auth-context";
 import { SummaryView } from "../features/summary/SummaryView";
+import { JobTiming } from "../features/summary/JobTiming";
 import { TripForm } from "../features/trips/TripForm";
 import { TripList } from "../features/trips/TripList";
 
@@ -78,6 +79,10 @@ export function DashboardPage() {
   const reportJob = jobs.data?.find(
     (job) => job.status === "completed" || job.status === "needs_review",
   );
+  const previousDocumentIds = new Set(reportJob?.document_ids ?? []);
+  const hasPreviousDocuments =
+    documents.data?.some((document) => previousDocumentIds.has(document.id)) ??
+    false;
   const summary = useQuery({
     queryKey: ["summary", reportJob?.id],
     queryFn: () => summariesApi.result(reportJob!.id),
@@ -116,25 +121,35 @@ export function DashboardPage() {
     },
   });
   const generate = useMutation({
-    mutationFn: () => summariesApi.generate(tripId!),
+    mutationFn: (force: boolean) => summariesApi.generate(tripId!, force),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["jobs", tripId] });
       await queryClient.invalidateQueries({ queryKey: ["summary"] });
     },
   });
   const upload = useMutation({
-    mutationFn: async (files: File[]) => {
-      const pdfs = files.filter(
-        (file) =>
-          file.type === "application/pdf" ||
-          file.name.toLowerCase().endsWith(".pdf"),
-      );
-      if (pdfs.length !== files.length)
-        throw new Error("Bitte nur PDF-Dokumente auswählen.");
-      for (const file of pdfs) await documentsApi.upload(tripId!, file);
+    mutationFn: ({ tripId, files }: { tripId: string; files: File[] }) =>
+      documentsApi.uploadMany(tripId, files),
+    onSuccess: async (_, { tripId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["documents", tripId] }),
+        queryClient.invalidateQueries({ queryKey: ["jobs", tripId] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+      ]);
     },
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["documents", tripId] }),
+  });
+
+  const removeDocument = useMutation({
+    mutationFn: (document: Document) => documentsApi.remove(document.id),
+    onSuccess: async (_, document) => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["documents", document.trip_id],
+        }),
+        queryClient.invalidateQueries({ queryKey: ["jobs", document.trip_id] }),
+        queryClient.invalidateQueries({ queryKey: ["summary"] }),
+      ]);
+    },
   });
 
   const queryError = [
@@ -149,6 +164,7 @@ export function DashboardPage() {
     createTrip.error,
     generate.error,
     upload.error,
+    removeDocument.error,
   ].find(Boolean);
   const visibleError =
     localError ||
@@ -160,15 +176,10 @@ export function DashboardPage() {
     createTrip.reset();
     generate.reset();
     upload.reset();
+    removeDocument.reset();
   };
   const activeJob =
     latestJob?.status === "queued" || latestJob?.status === "running";
-  const progress = latestJob?.total_chunks
-    ? Math.min(
-        100,
-        Math.round((latestJob.completed_chunks / latestJob.total_chunks) * 100),
-      )
-    : 0;
   useEffect(() => {
     if (latestJob?.status === "failed") {
       console.error("[TERA summary job failed]", {
@@ -307,25 +318,49 @@ export function DashboardPage() {
                         {latestJob && <StatusPill status={latestJob.status} />}
                       </div>
                       {activeJob && (
-                        <div className="mt-5">
-                          <div className="mb-2 flex justify-between text-xs font-semibold text-zinc-500">
+                        <div className="mt-5" role="status">
+                          <div className="mb-2 flex justify-between gap-2 text-xs font-semibold text-zinc-500">
                             <span>
                               {latestJob.status === "queued"
-                                ? "In Warteschlange"
-                                : "Verarbeitung"}
+                                ? "In Warteschlange …"
+                                : latestJob.completed_documents ===
+                                    latestJob.document_ids.length
+                                  ? "Bericht wird erstellt …"
+                                  : "Dokumente werden verarbeitet …"}
                             </span>
                             <span>
-                              {latestJob.completed_chunks}/
-                              {latestJob.total_chunks || "–"}
+                              {latestJob.completed_documents ?? 0}/
+                              {latestJob.document_ids.length}
                             </span>
                           </div>
-                          <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
+                          <div
+                            className="h-2 overflow-hidden rounded-full bg-zinc-100"
+                            role="progressbar"
+                            aria-label="Verarbeitete Dokumente"
+                            aria-valuemin={0}
+                            aria-valuemax={latestJob.document_ids.length}
+                            aria-valuenow={latestJob.completed_documents ?? 0}
+                          >
                             <div
-                              className="relative h-full min-w-8 overflow-hidden rounded-full bg-moss-500 transition-all after:absolute after:inset-0 after:animate-pulse after:bg-white/35"
-                              style={{ width: `${Math.max(progress, 8)}%` }}
+                              className="h-full rounded-full bg-moss-500 transition-all"
+                              style={{
+                                width: `${latestJob.document_ids.length ? (100 * (latestJob.completed_documents ?? 0)) / latestJob.document_ids.length : 0}%`,
+                              }}
                             />
                           </div>
                         </div>
+                      )}
+                      {latestJob && (
+                        <JobTiming key={latestJob.id} job={latestJob} />
+                      )}
+                      {!!latestJob?.reused_documents && (
+                        <p className="mt-2 text-xs text-zinc-500">
+                          {latestJob.reused_documents} bereits verarbeitete
+                          Belege übernommen ·{" "}
+                          {latestJob.document_ids.length -
+                            latestJob.reused_documents}{" "}
+                          {activeJob ? "werden analysiert" : "neu analysiert"}
+                        </p>
                       )}
                       <Button
                         className="mt-5 w-full"
@@ -334,17 +369,38 @@ export function DashboardPage() {
                           generate.isPending ||
                           activeJob
                         }
-                        onClick={() => generate.mutate()}
+                        onClick={() => generate.mutate(false)}
                       >
                         {generate.isPending ? (
                           <LoaderCircle size={16} className="animate-spin" />
                         ) : (
                           <RefreshCw size={16} />
                         )}
-                        {summary.data
-                          ? "Neu auswerten"
+                        {hasPreviousDocuments
+                          ? "Auswertung aktualisieren"
                           : "Auswertung erstellen"}
                       </Button>
+                      {summary.data && hasPreviousDocuments && (
+                        <button
+                          className="mt-3 w-full text-xs text-zinc-500 underline underline-offset-2"
+                          disabled={
+                            generate.isPending ||
+                            activeJob ||
+                            !documents.data?.length
+                          }
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                "Alle Belege erneut analysieren? Manuelle Änderungen und Entscheidungen werden nicht in die neue Auswertung übernommen. Die bisherige Auswertung bleibt gespeichert.",
+                              )
+                            ) {
+                              generate.mutate(true);
+                            }
+                          }}
+                        >
+                          Alle Belege neu analysieren
+                        </button>
+                      )}
                       {!documents.data?.length && (
                         <p className="mt-2 text-center text-[11px] text-zinc-400">
                           Mindestens ein PDF erforderlich
@@ -354,8 +410,34 @@ export function DashboardPage() {
                     <UploadPanel
                       documents={documents.data ?? []}
                       uploading={upload.isPending}
-                      onUpload={(files) => upload.mutate(files)}
+                      result={
+                        upload.variables?.tripId === tripId
+                          ? upload.data
+                          : undefined
+                      }
+                      onUpload={(files) =>
+                        upload.mutate({ tripId: tripId!, files })
+                      }
                       onDownload={downloadDocument}
+                      deletingId={
+                        removeDocument.isPending
+                          ? removeDocument.variables.id
+                          : undefined
+                      }
+                      deletionDisabled={
+                        Boolean(activeJob) ||
+                        upload.isPending ||
+                        removeDocument.isPending
+                      }
+                      onDelete={(document) => {
+                        if (
+                          window.confirm(
+                            `„${document.filename}“ wirklich löschen? Bestehende Auswertungen werden dadurch veraltet und müssen neu erstellt werden.`,
+                          )
+                        ) {
+                          removeDocument.mutate(document);
+                        }
+                      }}
                     />
                   </div>
                   <div className="min-w-0">

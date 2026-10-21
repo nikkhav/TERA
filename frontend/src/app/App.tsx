@@ -2,6 +2,7 @@ import { LoaderCircle } from "lucide-react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthPage } from "../features/auth/AuthPage";
 import { useAuth } from "../features/auth/auth-context";
+import { PdfPage } from "../pages/PdfPage";
 import { DashboardPage } from "../pages/DashboardPage";
 
 function ProtectedDashboard() {
@@ -18,6 +19,7 @@ function ProtectedDashboard() {
 export default function App() {
   return (
     <Routes>
+      <Route path="/documents/:documentId/view" element={<PdfPage />} />
       <Route path="/login" element={<AuthPage />} />
       <Route path="/" element={<ProtectedDashboard />} />
       <Route path="/employees/:employeeId" element={<ProtectedDashboard />} />

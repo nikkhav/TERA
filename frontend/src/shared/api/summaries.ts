@@ -7,10 +7,27 @@ import type {
 import { apiClient } from "./client";
 
 export const summariesApi = {
+  resolveRelationship: async (
+    jobId: string,
+    documentIds: string[],
+    resolution: "same_expense" | "separate" | "pending",
+    primaryDocumentId?: string,
+  ) =>
+    (
+      await apiClient.put<Summary>(`/summary-jobs/${jobId}/relationships`, {
+        document_ids: documentIds,
+        resolution,
+        primary_document_id: primaryDocumentId ?? null,
+      })
+    ).data,
   list: async (tripId: string) =>
     (await apiClient.get<Job[]>(`/trips/${tripId}/summaries`)).data,
-  generate: async (tripId: string) =>
-    (await apiClient.post<Job>(`/trips/${tripId}/summaries`)).data,
+  generate: async (tripId: string, force = false) =>
+    (
+      await apiClient.post<Job>(`/trips/${tripId}/summaries`, null, {
+        params: { force },
+      })
+    ).data,
   job: async (jobId: string) =>
     (await apiClient.get<Job>(`/summary-jobs/${jobId}`)).data,
   result: async (jobId: string) =>

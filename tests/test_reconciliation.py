@@ -10,7 +10,7 @@ from tera.processing import correction_feedback, process_document
 from tera.prompts import build_prompt
 from tera.reconciliation import reconcile
 from tera.reporting import make_report, merge_fragments
-from tera.schemas import ReceiptFacts
+from tera.schemas import Category, ReceiptFacts
 
 
 def hotel(**changes):
@@ -71,6 +71,7 @@ def test_two_tax_rates_and_exempt_city_tax_reconcile():
         "Hotel": "641.20",
         "Verpflegung": "71.40",
         "Flugreisen": "0",
+        "Transport": "0",
         "Sonstige Ausgaben": "0",
     }
     assert report["accommodation"][0]["without_breakfast"] == "641.20"
@@ -84,7 +85,6 @@ def test_two_tax_rates_and_exempt_city_tax_reconcile():
         ({"total": "673.40"}, "invoice_tax_mismatch"),
         ({"breakfast_total": "60"}, "breakfast_mismatch"),
         ({"net_total": "660", "tax_total": "52.60"}, "line_component_mismatch"),
-        ({"items": []}, "missing_items"),
     ],
 )
 def test_known_model_errors_require_review(change, code):
@@ -194,7 +194,7 @@ def test_targeted_correction_preserves_other_pages_and_tracks_progress():
     assert result["recheck_attempted"] and not result["warnings"]
     assert result["initial_issues"]
     assert len(calls) == 4  # The cross-page sum requires both source pages.
-    assert all("line_" in feedback for _, feedback in calls[2:])
+    assert all("items" in feedback and "Summe" in feedback for _, feedback in calls[2:])
     assert sum(v.get("completed", 0) for v in progress) == 4
     assert sum(v.get("added", 0) for v in progress) == 2
 
@@ -212,7 +212,7 @@ def test_category_correction_only_rereads_affected_page():
                 return full.model_copy(update={"items": full.items[2:]})
             first = ReceiptFacts(items=full.items[:2]).model_copy(deep=True)
             if feedback is None:
-                first.items[0].category = None
+                first.items[1].category = Category.HOTEL
             return first
 
     result = process_document(
@@ -320,3 +320,23 @@ def test_document_notices_do_not_trigger_correction_or_block_totals():
     record["warnings"] = ["Gesamtbetrag nicht eindeutig im Beleg nachgewiesen."]
     record["review_history"] = []
     assert make_report([record], "test", "test")["coverage"]["needs_review"] == 1
+
+
+def test_recheck_cannot_replace_complete_facts_with_missing_total_and_currency():
+    original = hotel()
+    original.notes = ["Betrag im Original prüfen."]
+
+    class Extractor:
+        def extract(self, document_id, pages, feedback=None):
+            return ReceiptFacts() if feedback else original
+
+    result = process_document(
+        doc(),
+        [[{"page": 1, "text": "Receipt"}]],
+        Extractor(),
+        Settings(_env_file=None),
+        lambda **_: None,
+    )
+    assert result["recheck_attempted"]
+    assert result["facts"]["total"] == "712.60"
+    assert result["facts"]["currency"] == "EUR"

@@ -106,3 +106,25 @@ def test_missing_rate_never_becomes_zero_and_original_totals_survive(monkeypatch
     record["facts"]["invoice_date"] = "2026-07-28"
     exchange_rates.attach_rate(record)
     assert record["exchange_rate"]["rate"] is None
+
+
+def test_rate_failure_is_retried_next_report_not_for_every_matching_receipt(monkeypatch):
+    calls = []
+
+    def offline(*args):
+        calls.append(args)
+        raise TimeoutError()
+
+    monkeypatch.setattr(exchange_rates, "historical_rate", offline)
+    cache = {}
+    for _ in range(3):
+        receipt = {"facts": {"currency": "AUD", "invoice_date": "2026-05-12"}}
+        exchange_rates.attach_rate(receipt, cache)
+        assert receipt["exchange_rate"]["error"]
+    assert len(calls) == 1
+    exchange_rates.attach_rate(receipt, {})
+    assert len(calls) == 2
+    payment = {"facts": {"document_kind": "payment", "currency": "AUD"}}
+    exchange_rates.attach_rate(payment, {})
+    assert payment["exchange_rate"] is None
+    assert len(calls) == 2

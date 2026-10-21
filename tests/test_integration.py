@@ -46,7 +46,9 @@ def test_postgres_s3_pipeline():
             yield session
 
     class Extractor:
-        def extract(self, *_):
+        def extract(self, document_id, pages):
+            if pages[0].get("text_start", 0) != 0:
+                return ReceiptFacts()
             return ReceiptFacts(
                 merchant="NORTHSTAR HOTEL BERLIN",
                 invoice_number="NSB-2026-0914-1042",

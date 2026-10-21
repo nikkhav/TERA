@@ -57,10 +57,10 @@ def historical_rate(currency: str, requested_on: date) -> dict:
     }
 
 
-def attach_rate(record):
+def attach_rate(record, cache=None):
     facts = record["facts"]
     currency, day = facts.get("currency"), facts.get("invoice_date")
-    if currency == "EUR":
+    if currency == "EUR" or facts.get("document_kind") in {"payment", "booking", "supporting"}:
         record["exchange_rate"] = None
         return
     previous = record.get("exchange_rate")
@@ -70,6 +70,10 @@ def attach_rate(record):
         and previous.get("currency") == currency
         and previous.get("requested_on") == day
     ):
+        return
+    key = (currency, day)
+    if cache is not None and key in cache:
+        record["exchange_rate"] = dict(cache[key])
         return
     try:
         record["exchange_rate"] = dict(historical_rate(currency, date.fromisoformat(day)))
@@ -84,6 +88,9 @@ def attach_rate(record):
             "source_url": SOURCE_URL,
             "error": "EUR-Umrechnung nicht verfügbar. Kursdatum und Währung prüfen.",
         }
+    if cache is not None:
+        # Cache failures only for this report; the next report can retry the provider.
+        cache[key] = dict(record["exchange_rate"])
 
 
 def euro_amount(amount, currency, snapshot):

@@ -13,6 +13,7 @@ FIELD_LABELS = {
     "origin": "Abfahrt / Abflug",
     "destination": "Ziel",
     "flight_number": "Flugnummer",
+    "flight_route": "Flugstrecke",
     "category": "Kategorie",
     "currency": "Währung",
     "total": "Gesamtbetrag",

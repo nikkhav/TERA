@@ -5,18 +5,21 @@ from tera.chunking import chunk_pages
 from tera.config import get_settings
 from tera.db import session_factory
 from tera.exchange_rates import attach_rate
+from tera.incremental import processing_fingerprint
 from tera.jobs import LostLease, claim_job, update_job
 from tera.llm import OllamaExtractor
 from tera.localization import localize_record
 from tera.models import Document, SummaryJob, now
+from tera.pdf import extract_pages
 from tera.processing import process_document
 from tera.prompts import PROMPT_VERSION
 from tera.reporting import make_report
+from tera.storage import LocalObjectStore, ObjectStore
 
 logger = logging.getLogger(__name__)
 
 
-def process_job(factory, settings, job_id, token, extractor=None):
+def process_job(factory, settings, job_id, token, extractor=None, store=None):
     started = time.monotonic()
     try:
         with factory() as session:
@@ -27,7 +30,31 @@ def process_job(factory, settings, job_id, token, extractor=None):
             documents = [session.get(Document, document_id) for document_id in job.document_ids]
             if any(document is None for document in documents):
                 raise ValueError("A document from the job snapshot is missing")
+            snapshot = job.processing_snapshot
+            if snapshot and snapshot["fingerprint"] != processing_fingerprint(settings):
+                raise ValueError("Processing configuration changed; create a new summary job")
+            records = (snapshot or {}).get("records", [])
+            reused_ids = {record["document_id"] for record in records}
+            if snapshot and any(snapshot["hashes"].get(doc.id) != doc.sha256 for doc in documents):
+                raise ValueError("A document changed since queueing; create a new summary job")
+            documents = [doc for doc in documents if doc.id not in reused_ids]
         extractor = extractor or OllamaExtractor(settings)
+        layout_errors = {}
+        for document in documents:
+            if all(page.get("layout_version") == 2 for page in document.pages):
+                continue
+            try:
+                store = store or (
+                    LocalObjectStore(settings)
+                    if settings.storage_backend == "local"
+                    else ObjectStore(settings)
+                )
+                document.pages = extract_pages(store.read(document.object_key), settings)
+            except Exception:
+                logger.exception("layout_refresh_failed document_id=%s", document.id)
+                layout_errors[document.id] = (
+                    "PDF-Text konnte nicht aktualisiert werden; gespeicherten Text bitte prüfen."
+                )
         batches = [(doc, chunk_pages(doc.id, doc.pages, settings)) for doc in documents]
         total = sum(len(chunks) for _, chunks in batches)
         logger.info(
@@ -39,7 +66,8 @@ def process_job(factory, settings, job_id, token, extractor=None):
             model,
         )
         update_job(factory, settings, job_id, token, total_chunks=total)
-        records, completed_count = [], 0
+        completed_count = 0
+        rate_cache = {}
 
         def progress(completed=0, added=0):
             nonlocal total, completed_count
@@ -54,17 +82,20 @@ def process_job(factory, settings, job_id, token, extractor=None):
                 total_chunks=total,
             )
 
-        for document, chunks in batches:
-            records.append(
-                process_document(document, chunks, extractor, settings, progress, job_id=job_id)
-            )
         if isinstance(extractor, OllamaExtractor):
-            progress(added=len(records))
-        for record in records:
+            progress(added=len(batches))
+        for document, chunks in batches:
+            record = process_document(
+                document, chunks, extractor, settings, progress, job_id=job_id
+            )
+            if document.id in layout_errors:
+                record["warnings"].append(layout_errors[document.id])
             if isinstance(extractor, OllamaExtractor):
                 localize_record(record, settings, progress)
-            attach_rate(record)
+            attach_rate(record, rate_cache)
+            records.append(record)
             progress(completed=1 if isinstance(extractor, OllamaExtractor) else 0)
+            update_job(factory, settings, job_id, token, completed_documents=len(records))
         report = make_report(records, model, prompt_version)
         status = "needs_review" if report["coverage"]["needs_review"] else "completed"
         if report["coverage"]["failed"] == report["coverage"]["supplied"]:

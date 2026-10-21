@@ -1,15 +1,23 @@
 """Merge fragments conservatively; calculate and render reports without an LLM."""
 
+import re
 from collections import defaultdict
 from copy import deepcopy
 from decimal import Decimal
 
+from tera.document_links import link_documents
 from tera.exchange_rates import euro_amount
 from tera.labels import FIELD_LABELS
 from tera.reconciliation import reconcile
+from tera.relationships import apply_relationship_decisions, explicitly_separate
 from tera.schemas import Category, ReceiptFacts, ValidationIssue
+from tera.transport import attach_flight_route, route_label
 
 CATEGORIES = [item.value for item in Category]
+VALIDITY_NOTICE = re.compile(
+    r"Gültigkeitszeitraum (?:endet|beginnt) am \d{1,2}\.\d{1,2}\.\d{4}"
+    r"(?: um \d{1,2}:\d{2} Uhr)?\.?"
+)
 
 
 def merge_fragments(document, fragments, errors, chunks):
@@ -28,29 +36,79 @@ def merge_fragments(document, fragments, errors, chunks):
                 f"Widersprüchliche Werte für {FIELD_LABELS.get(field, 'Belegangaben')}; manuelle Prüfung erforderlich."
             )
     items, anchors = [], {}
-    for fragment in fragments:
-        warnings.extend(fragment.notes)
+    for fragment_index, fragment in enumerate(fragments):
+        warnings.extend(
+            note
+            for note in fragment.notes
+            if not re.match(r"^[a-z_]+:\s", note)
+            and not VALIDITY_NOTICE.fullmatch(note)
+            and not note.startswith("Check ")
+            and not re.search(r"nicht eindeutig im Beleg nachgewiesen\.?$", note)
+            and not note.startswith(
+                (
+                    "Keine überprüfbaren Textbelege",
+                    "Summe der Positionen",
+                    "Fehlende oder unklare Angabe:",
+                )
+            )
+        )
         for item in fragment.items:
-            anchor = tuple(sorted((e.page, " ".join(e.quote.split())) for e in item.evidence))
+            # Only verified offsets identify a source occurrence. A quote alone can repeat.
+            anchor = tuple(
+                sorted(
+                    {
+                        (e.page, e.start, e.end)
+                        for e in item.evidence
+                        if e.start is not None and e.end is not None
+                    }
+                )
+            )
             if anchor and anchor in anchors:
-                prior = anchors[anchor]
+                prior_index, prior = anchors[anchor]
+                if prior_index == fragment_index:
+                    items.append(item)
+                    continue
                 if item.model_dump(exclude={"evidence"}) != prior.model_dump(exclude={"evidence"}):
                     warnings.append("Widersprüchliche Positionen mit identischem Textbeleg.")
+                    items.append(item)
                 continue
             items.append(item)
             if anchor:
-                anchors[anchor] = item
+                anchors[anchor] = (fragment_index, item)
     facts = ReceiptFacts(
         **values,
         items=items,
         multiple_receipts=any(f.multiple_receipts for f in fragments),
         evidence=[e for f in fragments for e in f.evidence],
     )
+    if any(fragment._evidence_checked for fragment in fragments):
+        from tera.llm import verify_facts
+
+        full_pages = getattr(document, "pages", None) or [p for chunk in chunks for p in chunk]
+        facts = verify_facts(facts, full_pages)
+        warnings.extend(facts.notes)
+    attach_flight_route(
+        facts, getattr(document, "pages", None) or [p for chunk in chunks for p in chunk]
+    )
     facts, issues, derived, items_reconciled = reconcile(facts)
     pages = sorted({p["page"] for chunk in chunks for p in chunk})
     issues.extend(
         ValidationIssue(code="extraction_review", message=w, pages=pages) for w in warnings
     )
+    notices = list(
+        dict.fromkeys([note for fragment in fragments for note in fragment.notices] + facts.notices)
+    )
+    notices.extend(
+        note for fragment in fragments for note in fragment.notes if VALIDITY_NOTICE.fullmatch(note)
+    )
+    if facts.document_kind in {"payment", "booking", "supporting"}:
+        notices.append(
+            {
+                "payment": "Zahlungsnachweis; nicht als zusätzliche Ausgabe summiert.",
+                "booking": "Buchungsbestätigung; nicht als zusätzliche Ausgabe summiert.",
+                "supporting": "Ergänzende Unterlage; nicht als zusätzliche Ausgabe summiert.",
+            }[facts.document_kind]
+        )
     return {
         "document_id": document.id,
         "filename": document.filename,
@@ -69,7 +127,7 @@ def merge_fragments(document, fragments, errors, chunks):
             for e in item.evidence
         ],
         "warnings": list(dict.fromkeys(issue.message for issue in issues)),
-        "notices": list(dict.fromkeys(note for fragment in fragments for note in fragment.notices)),
+        "notices": notices,
         "validation_issues": [issue.model_dump() for issue in issues],
         "derived_fields": derived,
         "items_reconciled": items_reconciled,
@@ -83,6 +141,15 @@ def mark_duplicates(records):
     groups = defaultdict(list)
     for record in records:
         f = record["facts"]
+        if f.get("category") != "Hotel":
+            f["overnight_count"] = None
+            f["room_count"] = None
+        if record.get("duplicate_of") or f.get("document_kind") in {
+            "payment",
+            "booking",
+            "supporting",
+        }:
+            continue
         if all(f[key] is not None for key in ("merchant", "invoice_number", "currency", "total")):
             key = (
                 (
@@ -100,6 +167,14 @@ def mark_duplicates(records):
     for group in groups.values():
         if len(group) > 1:
             for record in group:
+                record["related_document_ids"] = list(
+                    dict.fromkeys(
+                        record.get("related_document_ids", [])
+                        + [other["document_id"] for other in group if other is not record]
+                    )
+                )
+                if all(other is record or explicitly_separate(record, other) for other in group):
+                    continue
                 record["warnings"].append(
                     "Möglicher Doppelbeleg; nicht in bestätigten Summen enthalten."
                 )
@@ -107,6 +182,8 @@ def mark_duplicates(records):
 
 def make_report(records, model, prompt_version):
     records = deepcopy(records)
+    link_documents(records)
+    apply_relationship_decisions(records)
     mark_duplicates(records)
     expenses, accommodation, warnings = [], [], []
     for record in records:
@@ -124,10 +201,26 @@ def make_report(records, model, prompt_version):
             if record["warnings"]
             else "extracted"
         )
+        if record.get("duplicate_of") or f.get("document_kind") in {
+            "payment",
+            "booking",
+            "supporting",
+        }:
+            record["status"] = "needs_review" if record.get("extraction_failed") else "supporting"
+            if record["status"] == "needs_review":
+                warnings.extend(
+                    {
+                        "document_id": record["document_id"],
+                        "filename": record["filename"],
+                        "message": message,
+                    }
+                    for message in dict.fromkeys(record["warnings"])
+                )
+            continue
         base = {
             "document_id": record["document_id"],
             "filename": record["filename"],
-            "date": f["invoice_date"],
+            "date": f.get("service_start") or f["invoice_date"],
             "service_start": f["service_start"],
             "service_end": f["service_end"],
             "merchant": f["merchant"],
@@ -136,16 +229,35 @@ def make_report(records, model, prompt_version):
             "pages": sorted({source["page"] for source in record["sources"]}),
         }
         if record.get("items_reconciled"):
-            expenses.extend(
-                dict(
-                    base,
-                    category=item["category"],
-                    description=item["description"],
-                    amount=item["gross"],
-                    pages=sorted({e["page"] for e in item["evidence"]}),
+            grouped = defaultdict(list)
+            for item in f["items"]:
+                grouped[item["category"] or category].append(item)
+            for item_category, items in grouped.items():
+                label = item_category
+                merchant = (f.get("merchant") or "").casefold()
+                if item_category in {"Sonstige Ausgaben", "Transport"} and any(
+                    name in merchant for name in ("uber", "rasier")
+                ):
+                    label = "Taxifahrt einschließlich Gebühren"
+                if len(items) == 1:
+                    label = items[0]["description"]
+                elif item_category == "Hotel":
+                    label = "Unterkunft einschließlich Gebühren"
+                elif item_category == "Verpflegung" and all(i["is_breakfast"] for i in items):
+                    label = "Frühstück"
+                elif route_label(f):
+                    label = route_label(f)
+                elif f.get("transport_mode"):
+                    label = f["transport_mode"]
+                expenses.append(
+                    dict(
+                        base,
+                        category=item_category,
+                        description=label,
+                        amount=str(sum(Decimal(item["gross"]) for item in items)),
+                        pages=sorted({e["page"] for item in items for e in item["evidence"]}),
+                    )
                 )
-                for item in f["items"]
-            )
         elif category == "Hotel" and total is not None and breakfast is not None:
             expenses.extend(
                 [
@@ -165,7 +277,21 @@ def make_report(records, model, prompt_version):
                 dict(
                     base,
                     category=category,
-                    description=category,
+                    description=(
+                        route_label(f)
+                        if route_label(f)
+                        else "Taxifahrt"
+                        if category == "Transport"
+                        and any(
+                            name in (f.get("merchant") or "").casefold()
+                            for name in ("uber", "rasier")
+                        )
+                        else f.get("transport_mode")
+                        if category == "Transport" and f.get("transport_mode")
+                        else "Fahrt"
+                        if category == "Transport"
+                        else category
+                    ),
                     amount=str(total) if total is not None else None,
                 )
             )

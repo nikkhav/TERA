@@ -35,11 +35,14 @@ export type Job = {
   trip_id: string;
   status: "queued" | "running" | "completed" | "needs_review" | "failed";
   document_ids: string[];
+  completed_documents: number;
+  reused_documents: number;
   completed_chunks: number;
   total_chunks: number;
   error: string | null;
   created_at: string;
   finished_at: string | null;
+  started_at?: string | null;
 };
 
 export type Total = {
@@ -51,7 +54,7 @@ export type Total = {
 };
 
 export type ExpenseCategory =
-  "Hotel" | "Flugreisen" | "Verpflegung" | "Sonstige Ausgaben";
+  "Hotel" | "Flugreisen" | "Transport" | "Verpflegung" | "Sonstige Ausgaben";
 
 export type ExchangeRate = {
   currency: string | null;
@@ -62,6 +65,15 @@ export type ExchangeRate = {
   source_url: string;
   error: string | null;
 };
+export type Evidence = {
+  translation?: string | null;
+  page: number;
+  quote: string;
+  field: string | null;
+  block_id?: string | null;
+  start?: number | null;
+  end?: number | null;
+};
 export type ReceiptItem = {
   description: string;
   category: ExpenseCategory | null;
@@ -69,9 +81,19 @@ export type ReceiptItem = {
   tax: string | null;
   gross: string | null;
   is_breakfast: boolean;
-  evidence: { page: number; quote: string; field: string | null }[];
+  evidence: Evidence[];
 };
 export type ReceiptFacts = {
+  document_kind?:
+    | "invoice"
+    | "receipt"
+    | "payment"
+    | "booking"
+    | "supporting"
+    | "unknown"
+    | null;
+  service_reference?: string | null;
+  service_time?: string | null;
   merchant: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
@@ -93,6 +115,7 @@ export type ReceiptFacts = {
   origin: string | null;
   destination: string | null;
   flight_number: string | null;
+  flight_route?: string | null;
 };
 export type Expense = {
   amount_eur: string | null;
@@ -122,6 +145,16 @@ export type ReviewEvent = {
   reviewed_at: string;
 };
 export type DocumentResult = {
+  related_document_ids?: string[];
+  duplicate_of?: string | null;
+  relationship_history?: {
+    id: string;
+    resolution: "same_expense" | "separate" | "pending";
+    document_ids: string[];
+    primary_document_id: string | null;
+    user_name: string;
+    reviewed_at: string;
+  }[];
   facts: ReceiptFacts;
   original_texts: {
     merchant?: string;
@@ -143,7 +176,7 @@ export type DocumentResult = {
   extraction_failed: boolean;
   warnings: string[];
   notices: string[];
-  sources: { page: number; quote: string; field: string | null }[];
+  sources: Evidence[];
   review_history: ReviewEvent[];
 };
 

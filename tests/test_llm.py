@@ -68,7 +68,10 @@ def test_model_cannot_cite_unseen_text(monkeypatch, page, quote):
         {"done": True, "response": json.dumps({"evidence": [{"page": page, "quote": quote}]})},
     )
     assert not facts.evidence
-    assert any("Keine überprüfbaren Textbelege" in note for note in facts.notes)
+    from tera.llm import verify_facts
+
+    checked = verify_facts(facts, [{"page": 2, "text": "Hotel"}])
+    assert any("Keine überprüfbaren Textbelege" in note for note in checked.notes)
 
 
 def test_truncated_model_output_is_rejected(monkeypatch):
@@ -77,7 +80,10 @@ def test_truncated_model_output_is_rejected(monkeypatch):
 
 
 def test_missing_evidence_requires_review(monkeypatch):
-    assert run_extractor(monkeypatch, {"done": True, "response": "{}"}).notes
+    from tera.llm import verify_facts
+
+    facts = run_extractor(monkeypatch, {"done": True, "response": "{}"})
+    assert verify_facts(facts, [{"page": 2, "text": "Hotel"}]).notes
 
 
 @pytest.mark.parametrize("think", [True, False])

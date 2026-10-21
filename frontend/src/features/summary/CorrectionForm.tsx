@@ -1,3 +1,4 @@
+import { documentKinds } from "./review";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2 } from "lucide-react";
@@ -14,12 +15,15 @@ import { Button } from "../../shared/ui/Button";
 const categories: ExpenseCategory[] = [
   "Hotel",
   "Flugreisen",
+  "Transport",
   "Verpflegung",
   "Sonstige Ausgaben",
 ];
 const fields = [
   ["merchant", "Anbieter", "text"],
   ["invoice_number", "Rechnungsnummer", "text"],
+  ["service_reference", "Fahrt- / Buchungsreferenz", "text"],
+  ["service_time", "Uhrzeit der Leistung", "time"],
   ["invoice_date", "Rechnungsdatum / Kursdatum", "date"],
   ["currency", "Währung (ISO)", "text"],
   ["service_start", "Leistung von", "date"],
@@ -34,6 +38,7 @@ const fields = [
   ["origin", "Abfahrt / Abflug", "text"],
   ["destination", "Ziel", "text"],
   ["flight_number", "Flugnummer", "text"],
+  ["flight_route", "Vollständige Flugstrecke", "text"],
 ] as const;
 
 export function CorrectionForm({
@@ -91,33 +96,63 @@ export function CorrectionForm({
       }}
     >
       <h3 className="font-bold">Beleg korrigieren</h3>
+      <label className="block">
+        <span className="label">Dokumenttyp</span>
+        <select
+          className="field"
+          value={facts.document_kind ?? "unknown"}
+          onChange={(event) =>
+            setFacts((previous) => ({
+              ...previous,
+              document_kind: event.target
+                .value as ReceiptFacts["document_kind"],
+            }))
+          }
+        >
+          {Object.entries(documentKinds).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <span className="mt-1 block text-xs text-zinc-500">
+          Zahlungsnachweise, Buchungsbestätigungen und ergänzende Unterlagen
+          werden nicht zusätzlich summiert.
+        </span>
+      </label>
       <div className="grid gap-3 sm:grid-cols-2">
-        {fields.map(([key, label, type]) => (
-          <label key={key}>
-            <span className="label">{label}</span>
-            <input
-              className="field"
-              type={type}
-              step={type === "number" ? "any" : undefined}
-              value={facts[key] ?? ""}
-              maxLength={key === "currency" ? 3 : undefined}
-              onChange={(event) => {
-                const value = event.target.value;
-                setFacts((previous) => ({
-                  ...previous,
-                  [key]:
-                    value === ""
-                      ? null
-                      : key === "overnight_count" || key === "room_count"
-                        ? Number(value)
-                        : key === "currency"
-                          ? value.toUpperCase()
-                          : value,
-                }));
-              }}
-            />
-          </label>
-        ))}
+        {fields
+          .filter(
+            ([key]) =>
+              !["overnight_count", "room_count"].includes(key) ||
+              facts.category === "Hotel",
+          )
+          .map(([key, label, type]) => (
+            <label key={key}>
+              <span className="label">{label}</span>
+              <input
+                className="field"
+                type={type}
+                step={type === "number" ? "any" : undefined}
+                value={facts[key] ?? ""}
+                maxLength={key === "currency" ? 3 : undefined}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setFacts((previous) => ({
+                    ...previous,
+                    [key]:
+                      value === ""
+                        ? null
+                        : key === "overnight_count" || key === "room_count"
+                          ? Number(value)
+                          : key === "currency"
+                            ? value.toUpperCase()
+                            : value,
+                  }));
+                }}
+              />
+            </label>
+          ))}
         <label>
           <span className="label">Belegkategorie</span>
           <select

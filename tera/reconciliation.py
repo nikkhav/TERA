@@ -8,6 +8,9 @@ from tera.schemas import Category, ReceiptFacts, ValidationIssue
 
 def reconcile(facts: ReceiptFacts):
     facts = facts.model_copy(deep=True)
+    if facts.category is not None and facts.category != Category.HOTEL:
+        facts.overnight_count = None
+        facts.room_count = None
     issues, derived = [], []
     all_pages = sorted(
         {e.page for e in facts.evidence + [e for i in facts.items for e in i.evidence]}
@@ -23,9 +26,18 @@ def reconcile(facts: ReceiptFacts):
             )
         )
 
-    for field in ("merchant", "invoice_date", "category", "currency", "total"):
+    if facts.document_kind in {"payment", "booking", "supporting"}:
+        return facts, [], [], False
+
+    for field in ("category", "currency", "total"):
         if getattr(facts, field) is None:
             issue("missing_field", f"Fehlende oder unklare Angabe: {FIELD_LABELS[field]}.", [field])
+    if facts.currency and facts.currency != "EUR" and facts.invoice_date is None:
+        issue(
+            "missing_field",
+            "Fehlende oder unklare Angabe: Belegdatum für die EUR-Umrechnung.",
+            ["invoice_date"],
+        )
     if facts.service_start and facts.service_end and facts.service_start > facts.service_end:
         issue(
             "invalid_period",
@@ -83,6 +95,9 @@ def reconcile(facts: ReceiptFacts):
                 [prefix + ".gross"],
                 pages,
             )
+        if item.category is None and facts.category is not None:
+            item.category = Category.MEALS if item.is_breakfast else facts.category
+            derived.append(prefix + ".category")
         if item.category is None:
             issue(
                 "missing_line_category",
@@ -98,13 +113,11 @@ def reconcile(facts: ReceiptFacts):
                 pages,
             )
 
-    if not facts.items:
-        issue(
-            "missing_items",
-            "Keine Einzelpositionen für den Abgleich mit dem Gesamtbetrag verfügbar.",
-            ["items"],
-        )
-    elif all(item.gross is not None for item in facts.items) and facts.total is not None:
+    if (
+        facts.items
+        and all(item.gross is not None for item in facts.items)
+        and facts.total is not None
+    ):
         calculated = sum((item.gross for item in facts.items), Decimal(0))
         if calculated != facts.total:
             issue(

@@ -31,9 +31,11 @@ def claim_job(factory, settings):
             job.lease_token, job.lease_until = None, None
             return None
         job.status, job.lease_token = "running", new_id()
-        job.model = settings.ollama_model
+        if job.started_at is None:
+            job.started_at = now()
         job.lease_until = now() + timedelta(seconds=settings.job_lease_seconds)
         job.attempts += 1
+        job.completed_documents = job.reused_documents
         job.completed_chunks, job.total_chunks = 0, 0
         job.error, job.result = None, None
         session.flush()

@@ -15,9 +15,7 @@ def correction_feedback(issues):
     lines = []
     for issue in issues:
         fields = ", ".join(issue.get("fields", []))
-        line = (
-            f"{issue['code']}: {fields or 'verify all monetary quotations and uncertain readings'}"
-        )
+        line = f"Check {fields}: {issue['message']}" if fields else issue["message"]
         candidate = "\n".join(lines + [line])
         if len(candidate.encode()) <= limit:
             lines.append(line)
@@ -102,8 +100,31 @@ def process_document(document, chunks, extractor, settings, progress, job_id=Non
         pages = {p["page"] for p in chunks[index]}
         relevant = [i for i in initial if not i["pages"] or pages.intersection(i["pages"])]
         extract(index, correction_feedback(relevant))
-    record = merge_fragments(document, list(fragments.values()), list(errors.values()), chunks)
+    candidate = merge_fragments(document, list(fragments.values()), list(errors.values()), chunks)
+
+    def quality(value):
+        facts = value["facts"]
+        missing = sum(facts.get(field) is None for field in ("total", "currency", "category"))
+        missing += bool(
+            facts.get("currency") not in {None, "EUR"} and facts.get("invoice_date") is None
+        )
+        arithmetic = sum(
+            issue["code"]
+            in {
+                "line_sum_mismatch",
+                "invoice_tax_mismatch",
+                "line_tax_mismatch",
+                "line_component_mismatch",
+                "breakfast_mismatch",
+            }
+            for issue in value["validation_issues"]
+        )
+        lost_items = bool(record["facts"]["items"]) and not facts["items"]
+        return missing, value["extraction_failed"], lost_items, arithmetic, len(value["warnings"])
+
+    # A correction is a candidate, not permission to erase a better original extraction.
+    if quality(candidate) < quality(record):
+        record = candidate
     record["recheck_attempted"] = True
     record["initial_issues"] = initial
-    record["extraction_failed"] = len(fragments) < len(chunks)
     return record

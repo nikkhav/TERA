@@ -3,21 +3,31 @@ import {
   FileText,
   LoaderCircle,
   UploadCloud,
+  Trash2,
 } from "lucide-react";
 import { useRef, useState } from "react";
 import { cn } from "../../shared/lib/cn";
+import type { UploadResult } from "../../shared/api/documents";
 import type { Document } from "../../shared/types/domain";
 
 export function UploadPanel({
   documents,
   uploading,
+  result,
   onUpload,
   onDownload,
+  onDelete,
+  deletingId,
+  deletionDisabled,
 }: {
   documents: Document[];
   uploading: boolean;
+  result?: UploadResult;
   onUpload: (files: File[]) => void;
   onDownload: (document: Document) => void;
+  onDelete: (document: Document) => void;
+  deletingId?: string;
+  deletionDisabled: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -35,6 +45,7 @@ export function UploadPanel({
       <div className="p-4">
         <button
           type="button"
+          disabled={uploading}
           onClick={() => input.current?.click()}
           onDragOver={(event) => {
             event.preventDefault();
@@ -44,7 +55,7 @@ export function UploadPanel({
           onDrop={(event) => {
             event.preventDefault();
             setDragging(false);
-            onUpload([...event.dataTransfer.files]);
+            if (!uploading) onUpload([...event.dataTransfer.files]);
           }}
           className={cn(
             "focus-ring flex w-full flex-col items-center rounded-xl border border-dashed px-4 py-6 transition",
@@ -71,11 +82,38 @@ export function UploadPanel({
           type="file"
           accept="application/pdf,.pdf"
           multiple
+          disabled={uploading}
           onChange={(event) => {
             onUpload([...(event.target.files ?? [])]);
             event.target.value = "";
           }}
         />
+        {result && !uploading && (
+          <div
+            className="mt-3 space-y-2 text-sm"
+            role="status"
+            aria-live="polite"
+          >
+            <p>
+              {result.uploaded.length} von{" "}
+              {result.uploaded.length + result.failed.length} Dateien
+              hochgeladen.
+            </p>
+            {result.failed.length > 0 && (
+              <div className="rounded-lg bg-red-50 p-3 text-red-800">
+                <p className="font-semibold">Nicht hochgeladen:</p>
+                <ul className="mt-1 space-y-2">
+                  {result.failed.map((failure, index) => (
+                    <li key={index} className="break-words">
+                      <span className="font-semibold">{failure.filename}</span>:{" "}
+                      {failure.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
         {documents.length > 0 && (
           <ul className="mt-3 max-h-80 divide-y divide-line overflow-y-auto pr-1">
             {orderedDocuments.map((document) => (
@@ -99,6 +137,19 @@ export function UploadPanel({
                   title="PDF herunterladen"
                 >
                   <ArrowDownToLine size={16} />
+                </button>
+                <button
+                  className="focus-ring rounded-lg p-2 text-zinc-400 hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={deletionDisabled}
+                  onClick={() => onDelete(document)}
+                  title="Dokument löschen (nach Abschluss einer laufenden Auswertung)"
+                  aria-label={`${document.filename} löschen`}
+                >
+                  {deletingId === document.id ? (
+                    <LoaderCircle size={16} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
                 </button>
               </li>
             ))}

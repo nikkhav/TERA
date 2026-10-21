@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3.5:9b"
     ollama_think: bool | None = False
-    model_context_tokens: int = Field(default=8192, ge=4096)
-    model_output_tokens: int = Field(default=2048, ge=256)
+    model_context_tokens: int = Field(default=16384, ge=4096)
+    model_output_tokens: int = Field(default=4096, ge=256)
     receipt_recheck_enabled: bool = True
     model_timeout_seconds: int = Field(default=300, ge=1, le=900)
     max_upload_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
