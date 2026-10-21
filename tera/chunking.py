@@ -1,6 +1,10 @@
 from tera.prompts import RECHECK_RESERVE, build_prompt
 
 
+class ContextBudgetError(ValueError):
+    """Instructions alone exceed the configured conservative input budget."""
+
+
 def prompt_budget(settings) -> int:
     # A deliberately conservative UTF-8 byte budget, not a model tokenizer count.
     # Reserve both output tokens and room for Ollama's chat/template overhead.
@@ -43,7 +47,12 @@ def chunk_pages(document_id: str, pages: list[dict], settings) -> list[list[dict
                 else:
                     high = middle - 1
             if low == 0:
-                raise ValueError("Context budget is too small for the extraction prompt")
+                raise ContextBudgetError(
+                    "Das Eingabebudget reicht nicht für die Modellanweisungen aus. "
+                    "MODEL_CONTEXT_TOKENS erhöhen; empfohlene Einstellungen: "
+                    "MODEL_CONTEXT_TOKENS=16384, MODEL_OUTPUT_TOKENS=4096. "
+                    "API und Worker neu starten und eine neue Auswertung erstellen."
+                )
             # Prefer complete lines; otherwise retain every character across parts.
             cut = remaining.rfind("\n", 0, low)
             if cut >= 0:

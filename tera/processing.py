@@ -116,6 +116,7 @@ def process_document(document, chunks, extractor, settings, progress, job_id=Non
                 "line_tax_mismatch",
                 "line_component_mismatch",
                 "breakfast_mismatch",
+                "document_role_review",
             }
             for issue in value["validation_issues"]
         )

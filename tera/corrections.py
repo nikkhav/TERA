@@ -12,6 +12,8 @@ def corrected_record(record, facts: ReceiptFacts, user_id, user_name, timestamp,
     for item in facts.items:
         item.evidence = []
     facts, issues, derived, reconciled = reconcile(facts)
+    # Saving a document type is the reviewer's explicit resolution of role uncertainty.
+    issues = [issue for issue in issues if issue.code != "document_role_review"]
     if issues:
         raise ValueError(" ".join(dict.fromkeys(issue.message for issue in issues)))
     result = deepcopy(record)

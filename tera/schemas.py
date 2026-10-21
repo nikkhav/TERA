@@ -200,8 +200,16 @@ class ReceiptFacts(BaseModel):
     breakfast_tax: Money | None = None
     items: list[LineItem] = Field(default_factory=list, max_length=200)
     multiple_receipts: bool = False
-    notes: list[str] = Field(default_factory=list, max_length=50)
-    notices: list[str] = Field(default_factory=list, max_length=50)
+    notes: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Potential problems only: identify the unresolved discrepancy or uncertain reading and what to check. Ordinary factual context belongs in notices. Empty when no problem is identified.",
+    )
+    notices: list[str] = Field(
+        default_factory=list,
+        max_length=50,
+        description="Neutral useful information or ordinary document conditions. These do not request review. Potential errors or unreliable readings belong in notes.",
+    )
     evidence: list[Evidence] = Field(default_factory=list, max_length=50)
 
 

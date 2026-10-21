@@ -61,7 +61,7 @@ export function reviewSummary(document: DocumentResult): string[] {
     } else if (/Fehlend|Widersprüchliche Werte/i.test(warning)) {
       add(warning);
     } else {
-      add("Uneindeutige Belegangaben prüfen; Einzelheiten unter „Details“.");
+      add(warning);
     }
   }
   if (!result.length && warnings.length)

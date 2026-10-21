@@ -53,5 +53,5 @@ def route_label(facts):
     if not origin or not destination:
         return None
     if facts.get("category") == "Flugreisen" and origin.casefold() == destination.casefold():
-        return f"Hin- und Rückflug ({origin})"
+        return f"Start und Ziel: {origin}"
     return f"{origin} → {destination}"

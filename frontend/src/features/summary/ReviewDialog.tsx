@@ -13,6 +13,7 @@ import { summariesApi } from "../../shared/api/summaries";
 import { errorMessage } from "../../shared/api/client";
 import { saveBlob } from "../../shared/lib/download";
 import { formatMoney } from "../../shared/lib/format";
+import { receiptRoute } from "../../shared/lib/route";
 import type {
   DocumentResult,
   ReviewDecision,
@@ -63,12 +64,13 @@ export function ReviewDialog({
         decision,
         comment,
       ),
-    onSuccess: async (result) => {
+    onSuccess: async (result, decision) => {
       queryClient.setQueryData(["summary", summary.job_id], result);
+      setComment("");
+      if (decision === "approved") onClose();
       await queryClient.invalidateQueries({
         queryKey: ["jobs", summary.trip_id],
       });
-      setComment("");
     },
   });
   const download = useMutation({
@@ -136,7 +138,8 @@ export function ReviewDialog({
                     className="flex justify-between gap-4 py-3 text-sm"
                   >
                     <div>
-                      {expense.description}
+                      {expense.description !== receiptRoute(document.facts) &&
+                        expense.description}
                       <span className="mt-1 block text-xs text-zinc-500">
                         {expense.category}
                       </span>
@@ -224,7 +227,7 @@ export function ReviewDialog({
               />
               {document.warnings.length > 0 && (
                 <div className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
-                  <p className="mb-2 font-semibold">Automatische Prüfung</p>
+                  <p className="mb-2 font-semibold">Prüfbedarf</p>
                   <ul className="list-disc space-y-2 pl-4">
                     {reviewSummary(document).map((warning, index) => (
                       <li key={index}>{warning}</li>

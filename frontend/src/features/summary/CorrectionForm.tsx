@@ -35,10 +35,10 @@ const fields = [
   ["room_count", "Zimmer", "number"],
   ["transport_mode", "Verkehrsmittel", "text"],
   ["distance_km", "Entfernung (km)", "number"],
-  ["origin", "Abfahrt / Abflug", "text"],
+  ["origin", "Start", "text"],
   ["destination", "Ziel", "text"],
-  ["flight_number", "Flugnummer", "text"],
-  ["flight_route", "Vollständige Flugstrecke", "text"],
+  ["flight_number", "Verbindungsnummer", "text"],
+  ["flight_route", "Vollständige Strecke", "text"],
 ] as const;
 
 export function CorrectionForm({
@@ -124,8 +124,9 @@ export function CorrectionForm({
         {fields
           .filter(
             ([key]) =>
-              !["overnight_count", "room_count"].includes(key) ||
-              facts.category === "Hotel",
+              (!["overnight_count", "room_count"].includes(key) ||
+                facts.category === "Hotel") &&
+              (key !== "flight_route" || facts.category === "Flugreisen"),
           )
           .map(([key, label, type]) => (
             <label key={key}>

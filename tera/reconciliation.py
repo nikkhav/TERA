@@ -6,6 +6,22 @@ from tera.labels import FIELD_LABELS
 from tera.schemas import Category, ReceiptFacts, ValidationIssue
 
 
+def document_role_issue(kind, total, pages=()):
+    if kind != "booking" or total is None:
+        return None
+    return ValidationIssue(
+        code="document_role_review",
+        message=(
+            "Als Buchungsbestätigung eingeordnet, obwohl ein Gesamtbetrag vorliegt; "
+            "noch nicht als Ausgabe berücksichtigt. Dokumenttyp im Original prüfen: "
+            "Ausgestelltes Ticket oder Rechnung unter „Bearbeiten“ entsprechend zuordnen; "
+            "eine reine Reservierung bleibt Buchungsbestätigung."
+        ),
+        fields=["document_kind"],
+        pages=sorted(set(pages)),
+    )
+
+
 def reconcile(facts: ReceiptFacts):
     facts = facts.model_copy(deep=True)
     if facts.category is not None and facts.category != Category.HOTEL:
@@ -27,7 +43,8 @@ def reconcile(facts: ReceiptFacts):
         )
 
     if facts.document_kind in {"payment", "booking", "supporting"}:
-        return facts, [], [], False
+        role_issue = document_role_issue(facts.document_kind, facts.total, all_pages)
+        return facts, [role_issue] if role_issue else [], [], False
 
     for field in ("category", "currency", "total"):
         if getattr(facts, field) is None:

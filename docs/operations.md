@@ -47,6 +47,7 @@ Historical exchange rates come from the Bankenverband calculator's public endpoi
 | Docker cannot connect | Start Docker Desktop |
 | Queued job | Worker and model-init logs; model availability |
 | Slow or failed extraction | Worker logs: request duration, token counts and completion reason |
+| Failure before processing starts; input budget error | Set `MODEL_CONTEXT_TOKENS=16384` and `MODEL_OUTPUT_TOKENS=4096`, restart API/worker and create a new report. Older 8192/2048 settings may leave insufficient room for the current instructions under the conservative input budget. |
 | Rejected PDF | Selectable text on every page; password and file limits |
 | Unconverted currency | Invoice date, supported currency and provider availability |
 | Interrupted worker | Jobs can be reclaimed after the lease expires (default 20 minutes) |
@@ -61,9 +62,35 @@ The main table groups expense components by document and category. Detailed line
 
 `document_kind` distinguishes invoice/receipt (including priced tickets), payment, booking-only confirmation, supporting document and unknown. Supporting documents remain visible and downloadable without becoming extra expenses. Correct a wrong role using **Bearbeiten → Dokumenttyp**.
 
+A booking classification with an extracted total triggers a role check, including the bounded
+model correction pass. If unresolved, the document stays excluded from totals but appears as
+a review task with an explicit explanation. An issued ticket should be corrected to
+**Quittung / Ticket**; a genuine reservation can be confirmed by saving its booking type
+through **Bearbeiten**. A price alone never turns a reservation into an expense.
+
 `tera/document_links.py` links complementary invoice/receipt records when a shared service reference appears in verified source quotations and their currency and total agree. One record supplies the expense; additional records remain accessible as supporting evidence. Conflicting totals or weaker date/provider/amount matches require review and are not merged automatically. The user can correct the role/reference or reject a repeated expense document. Matching does not rely on filenames alone.
 
+Possible-duplicate matching also compares two invoices or two receipts: a model's choice
+between these roles must not hide a candidate. Matching dates, currency, amounts and provider
+identity require additional route/time agreement or a known provider alias. Conflicting
+printed times or complete routes exclude the candidate. These weaker matches require a
+reviewer's decision and never automatically remove an expense from totals.
+
 Review lists show grouped actions; detailed warnings remain expandable. Technical feedback codes are not presented as user-facing findings. Existing reports keep their saved output: generate a new report to apply these processing changes.
+
+Informational notices provide context without requiring review. Potential problems appear
+under **Prüfbedarf** and identify the discrepancy or uncertainty to check. The distinction
+depends on meaning, not on the expense category or whether an amount is involved. A doubtful
+route can require review; an ordinary route description does not. Model instructions and
+the JSON schema keep these two kinds of output separate; Python validation findings remain
+review warnings.
+
+When extraction produces model-written notes, a short local model request checks whether
+each note alleges a problem or merely states a condition. Informational observations become
+German notices before Python validates evidence and arithmetic. Python findings never enter
+this classification step. Failed, incomplete or numerically altered responses retain the
+original notes for review. This step uses the configured local model and adds a request only
+when the extraction actually returned notes. Translation preserves useful document conditions.
 
 New defaults are 16384 context tokens and 4096 output tokens. Existing environment files can override these: update `MODEL_CONTEXT_TOKENS` and `MODEL_OUTPUT_TOKENS` if they still contain the older 8192/2048 values. Larger limits require more memory; compare actual latency and memory usage with the selected model.
 

@@ -111,7 +111,6 @@ def localize_record(record, settings, progress=lambda: None):
         targets.extend(
             (record[field], i, "Beleghinweis" if field == "notices" else "Belegangabe bitte prüfen")
             for i in range(len(record[field]))
-            if needs_translation(record[field][i])
         )
     source_groups = {}
     for source in record["sources"]:

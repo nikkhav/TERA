@@ -8,7 +8,7 @@ from decimal import Decimal
 from tera.document_links import link_documents
 from tera.exchange_rates import euro_amount
 from tera.labels import FIELD_LABELS
-from tera.reconciliation import reconcile
+from tera.reconciliation import document_role_issue, reconcile
 from tera.relationships import apply_relationship_decisions, explicitly_separate
 from tera.schemas import Category, ReceiptFacts, ValidationIssue
 from tera.transport import attach_flight_route, route_label
@@ -18,6 +18,26 @@ VALIDITY_NOTICE = re.compile(
     r"Gültigkeitszeitraum (?:endet|beginnt) am \d{1,2}\.\d{1,2}\.\d{4}"
     r"(?: um \d{1,2}:\d{2} Uhr)?\.?"
 )
+TICKET_VALIDITY = re.compile(
+    r"Gültigkeit:\s*\d{1,2}\.\d{1,2}\.\d{4}\s+\d{1,2}:\d{2}(?: Uhr)?"
+    r"\s+bis\s+\d{1,2}\.\d{1,2}\.\d{4}\s+\d{1,2}:\d{2}(?: Uhr)?\.?"
+)
+TICKET_FARE = re.compile(
+    r"(?:Super )?(?:Sparpreis|Flexpreis) \((?:Einfache Fahrt|Hin- und Rückfahrt)\), "
+    r"Klasse [12]\. Klasse(?: Barcode)?, Reisender \d+ Person(?:en)?"
+    r"(?: \([\d\s–+\-]+ Jahre\))?\."
+    r"(?: Zugbindung (?:ICE|IC|EC|RE|RB) \d+, \d{1,2}:\d{2} Uhr am "
+    r"\d{1,2}\.\d{1,2}\.\d{4}\.)?"
+)
+
+
+def informational_note(text):
+    text = " ".join(text.split())
+    return bool(
+        VALIDITY_NOTICE.fullmatch(text)
+        or TICKET_VALIDITY.fullmatch(text)
+        or TICKET_FARE.fullmatch(text)
+    )
 
 
 def merge_fragments(document, fragments, errors, chunks):
@@ -41,7 +61,8 @@ def merge_fragments(document, fragments, errors, chunks):
             note
             for note in fragment.notes
             if not re.match(r"^[a-z_]+:\s", note)
-            and not VALIDITY_NOTICE.fullmatch(note)
+            and not informational_note(note)
+            and re.search(r"[^\W_]", note)
             and not note.startswith("Check ")
             and not re.search(r"nicht eindeutig im Beleg nachgewiesen\.?$", note)
             and not note.startswith(
@@ -99,7 +120,7 @@ def merge_fragments(document, fragments, errors, chunks):
         dict.fromkeys([note for fragment in fragments for note in fragment.notices] + facts.notices)
     )
     notices.extend(
-        note for fragment in fragments for note in fragment.notes if VALIDITY_NOTICE.fullmatch(note)
+        note for fragment in fragments for note in fragment.notes if informational_note(note)
     )
     if facts.document_kind in {"payment", "booking", "supporting"}:
         notices.append(
@@ -182,6 +203,28 @@ def mark_duplicates(records):
 
 def make_report(records, model, prompt_version):
     records = deepcopy(records)
+    for record in records:
+        role_issue = document_role_issue(
+            record["facts"].get("document_kind"),
+            record["facts"].get("total"),
+            [source["page"] for source in record["sources"]],
+        )
+        if record.get("correction_history"):
+            role_issue = None
+        if role_issue and not any(
+            issue.get("code") == role_issue.code for issue in record.get("validation_issues", [])
+        ):
+            record.setdefault("validation_issues", []).append(role_issue.model_dump())
+            record["warnings"].append(role_issue.message)
+        moved = [w for w in record["warnings"] if informational_note(w)]
+        discarded = set(moved + [w for w in record["warnings"] if not re.search(r"[^\W_]", w)])
+        record["warnings"] = [w for w in record["warnings"] if w not in discarded]
+        record["notices"] = list(dict.fromkeys(record.get("notices", []) + moved))
+        record["validation_issues"] = [
+            issue
+            for issue in record.get("validation_issues", [])
+            if issue.get("code") != "extraction_review" or issue.get("message") not in discarded
+        ]
     link_documents(records)
     apply_relationship_decisions(records)
     mark_duplicates(records)
@@ -206,7 +249,15 @@ def make_report(records, model, prompt_version):
             "booking",
             "supporting",
         }:
-            record["status"] = "needs_review" if record.get("extraction_failed") else "supporting"
+            unresolved_role = any(
+                issue.get("code") == "document_role_review"
+                for issue in record.get("validation_issues", [])
+            ) and decision not in {"approved", "rejected"}
+            record["status"] = (
+                "needs_review"
+                if record.get("extraction_failed") or unresolved_role
+                else "supporting"
+            )
             if record["status"] == "needs_review":
                 warnings.extend(
                     {

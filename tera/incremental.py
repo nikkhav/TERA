@@ -11,8 +11,8 @@ from tera.models import SummaryJob
 from tera.prompts import PROMPT_VERSION
 
 
-def processing_fingerprint(settings):
-    configuration = {
+def processing_configuration(settings):
+    return {
         name: getattr(settings, name)
         for name in (
             "ollama_url",
@@ -23,7 +23,10 @@ def processing_fingerprint(settings):
             "receipt_recheck_enabled",
         )
     }
-    digest = hashlib.sha256(json.dumps(configuration, sort_keys=True).encode())
+
+
+def processing_fingerprint(settings):
+    digest = hashlib.sha256(json.dumps(processing_configuration(settings), sort_keys=True).encode())
     # Invalidate cached results when processing, validation or translation code changes.
     for name in (
         "chunking",
@@ -35,6 +38,7 @@ def processing_fingerprint(settings):
         "reconciliation",
         "reporting",
         "localization",
+        "note_review",
         "exchange_rates",
         "currency_exchange",
         "labels",
@@ -52,6 +56,7 @@ def snapshot_inputs(session, trip_id, documents, settings, force=False):
     fingerprint = processing_fingerprint(settings)
     snapshot = {
         "fingerprint": fingerprint,
+        "configuration": processing_configuration(settings),
         "hashes": {doc.id: doc.sha256 for doc in documents},
         "records": [],
     }

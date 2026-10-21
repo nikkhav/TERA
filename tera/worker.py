@@ -1,8 +1,8 @@
 import logging
 import time
 
-from tera.chunking import chunk_pages
-from tera.config import get_settings
+from tera.chunking import ContextBudgetError, chunk_pages
+from tera.config import Settings, get_settings
 from tera.db import session_factory
 from tera.exchange_rates import attach_rate
 from tera.incremental import processing_fingerprint
@@ -19,24 +19,48 @@ from tera.storage import LocalObjectStore, ObjectStore
 logger = logging.getLogger(__name__)
 
 
+class JobConfigurationError(ValueError):
+    """A safe, actionable job setup error that can be shown in the UI."""
+
+
+def settings_for_job(settings, job):
+    configuration = (job.processing_snapshot or {}).get("configuration", {})
+    # The queue records what was requested; worker defaults may change before pickup.
+    configuration = {**configuration, "ollama_model": job.model}
+    return Settings.model_validate({**settings.model_dump(), **configuration})
+
+
 def process_job(factory, settings, job_id, token, extractor=None, store=None):
     started = time.monotonic()
     try:
         with factory() as session:
             job = session.get(SummaryJob, job_id)
             if job.prompt_version != PROMPT_VERSION:
-                raise ValueError("Prompt changed since queueing; create a new summary job")
+                raise JobConfigurationError(
+                    "API und Worker verwenden unterschiedliche Anweisungen. Beide Dienste "
+                    "mit demselben Code neu erstellen und eine neue Auswertung starten."
+                )
+            settings = settings_for_job(settings, job)
             model, prompt_version = job.model, job.prompt_version
             documents = [session.get(Document, document_id) for document_id in job.document_ids]
             if any(document is None for document in documents):
-                raise ValueError("A document from the job snapshot is missing")
+                raise JobConfigurationError(
+                    "Ein Dokument dieser Auswertung ist nicht mehr vorhanden. "
+                    "Eine neue Auswertung mit den aktuellen Dokumenten starten."
+                )
             snapshot = job.processing_snapshot
             if snapshot and snapshot["fingerprint"] != processing_fingerprint(settings):
-                raise ValueError("Processing configuration changed; create a new summary job")
+                raise JobConfigurationError(
+                    "Verarbeitungsversion oder Einstellungen von API und Worker stimmen "
+                    "nicht mit dem Auftrag überein. Beide Dienste mit demselben Code "
+                    "neu erstellen und eine neue Auswertung starten."
+                )
             records = (snapshot or {}).get("records", [])
             reused_ids = {record["document_id"] for record in records}
             if snapshot and any(snapshot["hashes"].get(doc.id) != doc.sha256 for doc in documents):
-                raise ValueError("A document changed since queueing; create a new summary job")
+                raise JobConfigurationError(
+                    "Ein Dokument wurde seit dem Start geändert. Eine neue Auswertung starten."
+                )
             documents = [doc for doc in documents if doc.id not in reused_ids]
         extractor = extractor or OllamaExtractor(settings)
         layout_errors = {}
@@ -83,6 +107,7 @@ def process_job(factory, settings, job_id, token, extractor=None, store=None):
             )
 
         if isinstance(extractor, OllamaExtractor):
+            extractor.heartbeat = progress
             progress(added=len(batches))
         for document, chunks in batches:
             record = process_document(
@@ -124,7 +149,7 @@ def process_job(factory, settings, job_id, token, extractor=None, store=None):
         )
     except LostLease:
         logger.warning("Lease lost: %s", job_id)
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "job_failed job_id=%s duration_seconds=%.2f", job_id, time.monotonic() - started
         )
@@ -136,7 +161,9 @@ def process_job(factory, settings, job_id, token, extractor=None, store=None):
                 token,
                 status="failed",
                 finished_at=now(),
-                error="Die Auswertung ist fehlgeschlagen. Bitte erneut versuchen.",
+                error=str(exc)
+                if isinstance(exc, (JobConfigurationError, ContextBudgetError))
+                else "Die Auswertung ist fehlgeschlagen. Bitte erneut versuchen.",
             )
         except LostLease:
             pass

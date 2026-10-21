@@ -7,6 +7,7 @@ import httpx
 
 from tera.chunking import prompt_budget
 from tera.labels import FIELD_LABELS
+from tera.note_review import review_model_notes
 from tera.prompts import build_prompt
 from tera.schemas import Evidence, ReceiptFacts
 from tera.transport import attach_flight_route
@@ -157,6 +158,7 @@ class OllamaExtractor:
     def __init__(self, settings):
         self.settings = settings
         self.model = settings.ollama_model
+        self.heartbeat = lambda: None
 
     def extract(
         self, document_id: str, pages: list[dict], feedback: str | None = None
@@ -272,6 +274,8 @@ class OllamaExtractor:
             raise
         if schema["properties"]["items"].get("maxItems") == 0:
             facts.items = []
+        self.heartbeat()
+        facts = review_model_notes(facts, self.settings)
         return verify_facts(facts, pages, validate_values=False)
 
 

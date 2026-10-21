@@ -100,13 +100,14 @@ def link_documents(records):
                     "Zusammengehörige Belege mit unterschiedlichen oder fehlenden Beträgen/Währungen; gemeinsam prüfen."
                 )
 
-    # Without a shared reference this is only a candidate, never an automatic merge.
+    # A candidate must not depend on the model distinguishing invoice from receipt.
+    # Without a shared reference this is never an automatic merge.
     for index, left in enumerate(records):
         for right in records[index + 1 :]:
             a, b = left["facts"], right["facts"]
             if left.get("duplicate_of") or right.get("duplicate_of"):
                 continue
-            if {a.get("document_kind"), b.get("document_kind")} != {"invoice", "receipt"}:
+            if any(f.get("document_kind") not in {"invoice", "receipt"} for f in (a, b)):
                 continue
             if not all(
                 a.get(k) is not None and b.get(k) is not None for k in ("total", "currency")
@@ -117,6 +118,20 @@ def link_documents(records):
                 and b.get("service_reference")
                 and a["service_reference"] != b["service_reference"]
             ):
+                continue
+            if (
+                a.get("service_time")
+                and b.get("service_time")
+                and a["service_time"] != b["service_time"]
+            ):
+                continue
+            routes = [
+                tuple(re.sub(r"[\W_]+", "", f[key]).casefold() for key in ("origin", "destination"))
+                if f.get("origin") and f.get("destination")
+                else None
+                for f in (a, b)
+            ]
+            if all(routes) and routes[0] != routes[1]:
                 continue
             day_a = a.get("service_start") or a.get("invoice_date")
             day_b = b.get("service_start") or b.get("invoice_date")

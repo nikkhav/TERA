@@ -394,7 +394,8 @@ def result_for_job(job_id, session):
             record["sources"].extend(
                 {"document_id": document.id, **e.model_dump()} for e in facts.evidence
             )
-        result = make_report(records, result["model"], result["prompt_version"])
+        result = {**result, "documents": records}
+    result = make_report(result["documents"], result["model"], result["prompt_version"])
     return {
         "job_id": job.id,
         "trip_id": job.trip_id,

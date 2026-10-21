@@ -1,19 +1,10 @@
 import type { ReceiptFacts } from "../../shared/types/domain";
 import { formatDate } from "../../shared/lib/format";
+import { receiptRoute } from "../../shared/lib/route";
 
 export function ReceiptDetails({ facts }: { facts: ReceiptFacts }) {
   const isHotel = facts.category === "Hotel";
-  const isFlight = facts.category === "Flugreisen";
-  const roundTrip =
-    isFlight &&
-    facts.origin &&
-    facts.destination &&
-    facts.origin.toLowerCase() === facts.destination.toLowerCase();
-  const route =
-    (isFlight && facts.flight_route) ||
-    (roundTrip
-      ? `Hin- und Rückflug (${facts.origin})`
-      : [facts.origin, facts.destination].filter(Boolean).join(" → "));
+  const route = receiptRoute(facts);
   const details = [
     [
       "Leistungszeitraum",
@@ -25,7 +16,7 @@ export function ReceiptDetails({ facts }: { facts: ReceiptFacts }) {
     ["Zimmer", isHotel ? facts.room_count : null],
     ["Verkehrsmittel", facts.transport_mode],
     ["Strecke", route || null],
-    ["Flugnummer", facts.flight_number],
+    ["Verbindungsnummer", facts.flight_number],
     [
       "Entfernung",
       facts.distance_km != null ? `${facts.distance_km} km` : null,
