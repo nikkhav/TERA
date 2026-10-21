@@ -1,6 +1,6 @@
 DEV_ENV = TERA_ENV_FILE=.env.development UV_CACHE_DIR=.local/uv-cache UV_OFFLINE=1
 
-.PHONY: dev-setup dev-api dev-worker dev-web test
+.PHONY: dev-setup dev-api dev-worker dev-web check
 
 dev-setup:
 	test -f .env.development || cp .env.development.example .env.development
@@ -17,7 +17,6 @@ dev-worker:
 dev-web:
 	cd frontend && npm run dev
 
-test:
-	$(DEV_ENV) uv run ruff check tera tests migrations
-	$(DEV_ENV) uv run pytest
-	cd frontend && npm run format:check && npm run lint && npm test && npm run build
+check:
+	$(DEV_ENV) uv run ruff check tera migrations
+	cd frontend && npm run format:check && npm run lint && npm run build

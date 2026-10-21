@@ -78,11 +78,10 @@ The model extracts facts and identifies the document role; Python combines resul
 ## Checks and further reading
 
 ```bash
-make test
+make check
 ```
 
 - [Setup, configuration and troubleshooting](docs/operations.md)
-- [User testing checklist and current limits](docs/testing.md)
 - [API documentation](http://localhost:8000/docs)
 
-Main code: `tera/pdf.py` and `chunking.py` prepare input; `llm.py` checks extraction evidence; `reconciliation.py` checks arithmetic; `reporting.py` builds reports; `api.py` and `worker.py` run the workflow. The React interface is in `frontend/src`. Model experiments are in `research/`.
+Main code: `tera/pdf.py` and `chunking.py` prepare input; `llm.py` checks extraction evidence; `reconciliation.py` checks arithmetic; `reporting.py` builds reports; `api.py` and `worker.py` run the workflow. The React interface is in `frontend/src`.
