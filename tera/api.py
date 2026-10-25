@@ -8,7 +8,7 @@ from uuid import UUID
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -75,6 +75,52 @@ def lock_trip(session, trip_id):
     if trip is None:
         raise HTTPException(404, "Trip not found")
     return trip
+
+
+def lock_employee(session, employee_id):
+    employee = session.scalar(
+        select(Employee).where(Employee.id == str(employee_id)).with_for_update()
+    )
+    if employee is None:
+        raise HTTPException(404, "Employee not found")
+    return employee
+
+
+def delete_trip_data(session, store, trips, employee=None):
+    trip_ids = [trip.id for trip in trips]
+    active = session.scalar(
+        select(SummaryJob.id).where(
+            SummaryJob.trip_id.in_(trip_ids), SummaryJob.status.in_(["queued", "running"])
+        )
+    )
+    if active:
+        raise HTTPException(409, "Bitte warten, bis alle laufenden Auswertungen abgeschlossen sind.")
+    documents = session.scalars(select(Document).where(Document.trip_id.in_(trip_ids))).all()
+    originals = {}
+    try:
+        # Keep originals until commit so a storage or database failure can be rolled back.
+        for document in documents:
+            originals[document.object_key] = store.read(document.object_key)
+        session.execute(delete(SummaryJob).where(SummaryJob.trip_id.in_(trip_ids)))
+        session.execute(delete(Document).where(Document.trip_id.in_(trip_ids)))
+        session.execute(delete(Trip).where(Trip.id.in_(trip_ids)))
+        if employee is not None:
+            session.delete(employee)
+        session.flush()
+        for key in originals:
+            store.delete(key)
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        for key, data in originals.items():
+            try:
+                store.put(key, data)
+            except Exception:
+                logger.exception("Could not restore document after failed deletion: %s", key)
+        if isinstance(exc, (BotoCoreError, ClientError, StorageError)):
+            raise HTTPException(503, "Document storage unavailable") from exc
+        raise
+    return Response(status_code=204)
 
 
 @app.get("/health")
@@ -151,9 +197,21 @@ def get_employee(employee_id: UUID, session: DB):
     return require(session, Employee, employee_id)
 
 
+@protected.delete("/employees/{employee_id}", status_code=204)
+def delete_employee(employee_id: UUID, session: DB, store: Store):
+    employee = lock_employee(session, employee_id)
+    trips = session.scalars(
+        select(Trip)
+        .where(Trip.employee_id == str(employee_id))
+        .order_by(Trip.id)
+        .with_for_update()
+    ).all()
+    return delete_trip_data(session, store, trips, employee)
+
+
 @protected.post("/employees/{employee_id}/trips", response_model=TripOut, status_code=201)
 def create_trip(employee_id: UUID, body: TripCreate, session: DB):
-    require(session, Employee, employee_id)
+    lock_employee(session, employee_id)
     trip = Trip(employee_id=str(employee_id), **body.model_dump())
     session.add(trip)
     session.commit()
@@ -179,6 +237,12 @@ def update_trip(trip_id: UUID, body: TripCreate, session: DB):
         setattr(trip, field, value)
     session.commit()
     return trip
+
+
+@protected.delete("/trips/{trip_id}", status_code=204)
+def delete_trip(trip_id: UUID, session: DB, store: Store):
+    trip = lock_trip(session, trip_id)
+    return delete_trip_data(session, store, [trip])
 
 
 @protected.get("/trips/{trip_id}", response_model=TripOut)

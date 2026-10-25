@@ -8,6 +8,7 @@ import {
   Pencil,
   RefreshCw,
   Soup,
+  Trash2,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -42,6 +43,9 @@ export function DashboardPage() {
   const { user, logout } = useAuth();
   const [employeeModal, setEmployeeModal] = useState(false);
   const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
+  const [deletion, setDeletion] = useState<
+    { kind: "employee"; item: Employee } | { kind: "trip"; item: Trip } | null
+  >(null);
   const [tripModal, setTripModal] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [localError, setLocalError] = useState("");
@@ -118,6 +122,28 @@ export function DashboardPage() {
         (current = []) =>
           current.map((item) => (item.id === trip.id ? trip : item)),
       );
+    },
+  });
+  const remove = useMutation({
+    mutationFn: async (target: NonNullable<typeof deletion>) => {
+      if (target.kind === "employee") await employeesApi.remove(target.item.id);
+      else await tripsApi.remove(target.item.id);
+    },
+    onSuccess: async (_, target) => {
+      setDeletion(null);
+      navigate(
+        target.kind === "employee"
+          ? "/"
+          : `/employees/${target.item.employee_id}`,
+        { replace: true },
+      );
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["employees"] }),
+        queryClient.invalidateQueries({ queryKey: ["trips"] }),
+      ]);
+      queryClient.removeQueries({ queryKey: ["documents"] });
+      queryClient.removeQueries({ queryKey: ["jobs"] });
+      queryClient.removeQueries({ queryKey: ["summary"] });
     },
   });
   const generate = useMutation({
@@ -279,25 +305,54 @@ export function DashboardPage() {
                     </p>
                   )}
                 </div>
-                {selectedTrip ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => setEditingTrip(selectedTrip)}
-                  >
-                    <Pencil size={16} />
-                    Reise bearbeiten
-                  </Button>
-                ) : (
-                  !tripId && (
+                <div className="flex flex-wrap items-center gap-2">
+                  {selectedTrip ? (
                     <Button
                       variant="secondary"
-                      onClick={() => setTripModal(true)}
+                      onClick={() => setEditingTrip(selectedTrip)}
                     >
-                      <Plus size={16} />
-                      Neue Reise
+                      <Pencil size={16} />
+                      Reise bearbeiten
                     </Button>
-                  )
-                )}
+                  ) : (
+                    !tripId && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => setTripModal(true)}
+                      >
+                        <Plus size={16} />
+                        Neue Reise
+                      </Button>
+                    )
+                  )}
+                  {(selectedTrip || !tripId) && (
+                    <Button
+                      variant="ghost"
+                      className="hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-40"
+                      disabled={
+                        Boolean(activeJob) ||
+                        upload.isPending ||
+                        remove.isPending
+                      }
+                      title={
+                        activeJob
+                          ? "Bitte das Ende der Auswertung abwarten"
+                          : undefined
+                      }
+                      onClick={() => {
+                        remove.reset();
+                        setDeletion(
+                          selectedTrip
+                            ? { kind: "trip", item: selectedTrip }
+                            : { kind: "employee", item: selectedEmployee },
+                        );
+                      }}
+                    >
+                      <Trash2 size={16} />
+                      {selectedTrip ? "Reise löschen" : "Person löschen"}
+                    </Button>
+                  )}
+                </div>
               </section>
               {!tripId &&
                 (trips.isLoading ? (
@@ -474,6 +529,50 @@ export function DashboardPage() {
           )}
         </div>
       </main>
+      {deletion && (
+        <Modal
+          title={
+            deletion.kind === "trip" ? "Reise löschen?" : "Person löschen?"
+          }
+          onClose={() => {
+            if (!remove.isPending) setDeletion(null);
+          }}
+        >
+          <p className="text-sm leading-6 text-zinc-600">
+            <strong className="text-ink">{deletion.item.name}</strong>
+            {deletion.kind === "trip"
+              ? " und alle zugehörigen Dokumente und Auswertungen werden dauerhaft gelöscht."
+              : " und alle zugehörigen Reisen, Dokumente und Auswertungen werden dauerhaft gelöscht."}{" "}
+            Diese Aktion kann nicht rückgängig gemacht werden.
+          </p>
+          {remove.error && (
+            <p role="alert" className="mt-4 text-sm text-red-700">
+              {errorMessage(remove.error)}
+            </p>
+          )}
+          <div className="mt-6 flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              disabled={remove.isPending}
+              onClick={() => setDeletion(null)}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              className="bg-red-700 hover:bg-red-800"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate(deletion)}
+            >
+              {remove.isPending ? (
+                <LoaderCircle size={16} className="animate-spin" />
+              ) : (
+                <Trash2 size={16} />
+              )}
+              Endgültig löschen
+            </Button>
+          </div>
+        </Modal>
+      )}
       {employeeModal && (
         <Modal
           title="Mitarbeitende hinzufügen"

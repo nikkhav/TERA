@@ -5,6 +5,9 @@ import { listAll } from "./pagination";
 export type TripInput = Pick<Trip, "name" | "starts_on" | "ends_on">;
 
 export const tripsApi = {
+  remove: async (tripId: string) => {
+    await apiClient.delete(`/trips/${tripId}`);
+  },
   list: (employeeId: string) => listAll<Trip>(`/employees/${employeeId}/trips`),
   update: async (tripId: string, input: TripInput) =>
     (await apiClient.put<Trip>(`/trips/${tripId}`, input)).data,

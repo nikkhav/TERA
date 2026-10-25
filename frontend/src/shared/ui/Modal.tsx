@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
+import { createPortal } from "react-dom";
 
 export function Modal({
   title,
@@ -19,7 +20,7 @@ export function Modal({
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [onClose]);
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-zinc-950/30 p-4 backdrop-blur-sm"
       onMouseDown={onClose}
@@ -43,6 +44,7 @@ export function Modal({
         </div>
         {children}
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
