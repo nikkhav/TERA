@@ -22,6 +22,55 @@ Finish active jobs before changing the model. For Docker, update `.env`, run `do
 
 Before a production deployment, set `APP_ENVIRONMENT=production` and a unique signing secret of at least 32 bytes. All accounts share one employee/trip workspace. Separate organizations and roles are not implemented.
 
+## Password recovery without email
+
+The server administrator issues a one-time recovery link through Docker. This requires
+server/container access; there is no HTTP endpoint for issuing recovery links and ordinary
+application accounts have no password-reset administration permissions.
+
+After deploying this change, apply the included migration before starting the new API:
+
+```bash
+docker compose build
+docker compose run --rm init
+docker compose up -d
+```
+
+Use the same Compose files throughout when running host Ollama, for example
+`docker compose -f compose.yaml -f compose.host-ollama.yaml` instead of `docker compose`.
+
+For an existing account, run from the project directory:
+
+```bash
+docker compose exec api python -m tera.password_reset person@example.org --base-url https://tera.example.org
+```
+
+Replace the email and URL with the account's email and the actual application address
+(not the API address). For local testing, `--base-url http://localhost:3000` is allowed.
+For local development outside Docker:
+
+```bash
+TERA_ENV_FILE=.env.development uv run python -m tera.password_reset person@example.org --base-url http://localhost:5173
+```
+
+Verify the account owner's identity and give them the printed link through an existing
+private communication channel. Treat the full link as a temporary credential; it allows
+setting a password without knowing the old one. The user opens the link, enters and
+confirms a new password (12–128 characters), then signs in normally. The login page's
+**Passwort vergessen?** hint explains how to contact the administration.
+
+Links expire after 30 minutes by default; `--expires-minutes 60` changes the lifetime
+(5–1440 minutes). Creating another link invalidates any earlier link for that account.
+Only a SHA-256 digest of the random token is stored in the database. The token is placed
+in the URL fragment and removed from the address bar after opening, so it does not appear
+in server access logs. Reloading the page requires opening the original link again.
+
+Issuing a link does not change the current password or terminate sessions. Successfully
+setting the new password consumes the link, replaces the password hash, and invalidates
+all existing access tokens for that account. Other accounts and their sessions are
+unaffected. Recovery also works when new-account registration is disabled. Inactive
+accounts cannot be reset. No email service or new environment setting is needed.
+
 ## Reports and source locations
 
 Uploads accept readable PDFs with a text layer (default limits: 20 MB and 200 pages). Scanned pages without text and password-protected PDFs are rejected. Original files remain available to download.

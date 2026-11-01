@@ -17,6 +17,7 @@ import { EmptyState } from "../../shared/ui/EmptyState";
 import { StatusPill } from "../../shared/ui/StatusPill";
 import { CategoryCard } from "./CategoryCard";
 import { ExpenseTable } from "./ExpenseTable";
+import { SummaryTotals } from "./SummaryTotals";
 
 export function SummaryView({ summary }: { summary: Summary }) {
   const [tab, setTab] = useState<"overview" | "expenses" | "review">(
@@ -86,43 +87,7 @@ export function SummaryView({ summary }: { summary: Summary }) {
             <h2 className="text-xl font-bold tracking-tight">Auswertung</h2>
           </div>
         </div>
-        <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,240px),1fr))] gap-3">
-          {[
-            ...(summary.totals.eur ?? []),
-            ...summary.totals.by_currency.filter(
-              (total) => total.currency !== "EUR",
-            ),
-          ].map((total) => (
-            <div
-              key={total.currency ?? "unknown"}
-              className="rounded-2xl bg-ink p-5 text-white"
-            >
-              <p className="text-xs font-semibold text-zinc-400">
-                {total.unknown_amounts > 0 ? "Teilsumme" : "Gesamtsumme"} ·{" "}
-                {total.currency ?? "ohne Währung"}
-              </p>
-              <p className="mt-2 text-2xl font-bold tracking-tight">
-                {formatMoney(total.confirmed, total.currency)}
-              </p>
-              {Number(total.excluded || 0) !== 0 && (
-                <p className="mt-2 text-xs text-zinc-300">
-                  {formatMoney(total.excluded, total.currency)} abgelehnt
-                </p>
-              )}
-              {(Number(total.in_review) !== 0 || total.unknown_amounts > 0) && (
-                <p className="mt-3 text-xs text-zinc-300">
-                  {formatMoney(total.in_review, total.currency)} in Prüfung ·{" "}
-                  {total.unknown_amounts} ohne Betrag
-                </p>
-              )}
-            </div>
-          ))}
-          {!summary.totals.by_currency.length && (
-            <p className="text-sm text-zinc-500">
-              Noch keine Beträge verfügbar.
-            </p>
-          )}
-        </div>
+        <SummaryTotals totals={summary.totals} />
       </div>
       <ReceiptNotices notices={summary.notices ?? []} onReview={openReview} />
       {summary.documents.some(

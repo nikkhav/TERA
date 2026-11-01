@@ -1,6 +1,7 @@
 import { LoaderCircle } from "lucide-react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AuthPage } from "../features/auth/AuthPage";
+import { ResetPasswordPage } from "../features/auth/ResetPasswordPage";
 import { useAuth } from "../features/auth/auth-context";
 import { PdfPage } from "../pages/PdfPage";
 import { DashboardPage } from "../pages/DashboardPage";
@@ -21,6 +22,7 @@ export default function App() {
     <Routes>
       <Route path="/documents/:documentId/view" element={<PdfPage />} />
       <Route path="/login" element={<AuthPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/" element={<ProtectedDashboard />} />
       <Route path="/employees/:employeeId" element={<ProtectedDashboard />} />
       <Route

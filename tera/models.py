@@ -23,6 +23,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(500))
+    auth_version: Mapped[int] = mapped_column(default=0, server_default="0")
+    reset_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    reset_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 

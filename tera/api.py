@@ -6,8 +6,10 @@ from urllib.parse import quote
 from uuid import UUID
 
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -26,6 +28,7 @@ from tera.exchange_rates import attach_rate
 from tera.incremental import snapshot_inputs
 from tera.llm import refresh_saved_date_source
 from tera.models import Document, Employee, SummaryJob, Trip, User, new_id, now
+from tera.password_reset import redeem_reset
 from tera.pdf import extract_pages
 from tera.prompts import PROMPT_VERSION
 from tera.reporting import make_report
@@ -36,6 +39,7 @@ from tera.schemas import (
     EmployeeCreate,
     EmployeeOut,
     JobOut,
+    PasswordResetInput,
     ReceiptFacts,
     RegistrationStatus,
     RelationshipInput,
@@ -61,6 +65,20 @@ Limit = Annotated[int, Query(ge=1, le=500)]
 Offset = Annotated[int, Query(ge=0)]
 logger = logging.getLogger(__name__)
 protected = APIRouter(dependencies=[Depends(get_current_user)])
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path == "/auth/reset-password":
+        # Validation errors normally echo input; never echo a new password or reset token.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": "Ungültiger Link oder Passwort. Das Passwort muss 12 bis 128 Zeichen enthalten."
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    return await request_validation_exception_handler(request, exc)
 
 
 def require(session, model, identifier):
@@ -94,7 +112,9 @@ def delete_trip_data(session, store, trips, employee=None):
         )
     )
     if active:
-        raise HTTPException(409, "Bitte warten, bis alle laufenden Auswertungen abgeschlossen sind.")
+        raise HTTPException(
+            409, "Bitte warten, bis alle laufenden Auswertungen abgeschlossen sind."
+        )
     documents = session.scalars(select(Document).where(Document.trip_id.in_(trip_ids))).all()
     originals = {}
     try:
@@ -174,6 +194,17 @@ def me(user: CurrentUser):
     return user
 
 
+@app.post("/auth/reset-password", status_code=204)
+def reset_password(body: PasswordResetInput, session: DB):
+    if not redeem_reset(session, body.token, body.password):
+        raise HTTPException(
+            400,
+            "Der Link ist ungültig oder abgelaufen. Bitte die Administration kontaktieren.",
+            headers={"Cache-Control": "no-store"},
+        )
+    return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+
 @protected.post("/employees", response_model=EmployeeOut, status_code=201)
 def create_employee(body: EmployeeCreate, session: DB):
     employee = Employee(**body.model_dump())
@@ -201,10 +232,7 @@ def get_employee(employee_id: UUID, session: DB):
 def delete_employee(employee_id: UUID, session: DB, store: Store):
     employee = lock_employee(session, employee_id)
     trips = session.scalars(
-        select(Trip)
-        .where(Trip.employee_id == str(employee_id))
-        .order_by(Trip.id)
-        .with_for_update()
+        select(Trip).where(Trip.employee_id == str(employee_id)).order_by(Trip.id).with_for_update()
     ).all()
     return delete_trip_data(session, store, trips, employee)
 

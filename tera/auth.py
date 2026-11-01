@@ -44,6 +44,7 @@ def create_access_token(user: User) -> str:
         {
             "sub": user.id,
             "email": user.email,
+            "ver": user.auth_version,
             "iat": issued,
             "exp": issued + timedelta(minutes=settings.auth_token_minutes),
             "iss": "tera",
@@ -76,7 +77,7 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
     user = session.get(User, user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or payload.get("ver", 0) != user.auth_version:
         raise HTTPException(
             401, "Invalid or expired session", headers={"WWW-Authenticate": "Bearer"}
         )

@@ -18,5 +18,6 @@ dev-web:
 	cd frontend && npm run dev
 
 check:
-	$(DEV_ENV) uv run ruff check tera migrations
+	$(DEV_ENV) uv run ruff check tera migrations tests
+	$(DEV_ENV) uv run python -m unittest discover -s tests -v
 	cd frontend && npm run format:check && npm run lint && npm run build

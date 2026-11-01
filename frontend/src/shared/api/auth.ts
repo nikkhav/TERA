@@ -2,6 +2,9 @@ import type { AuthResponse, User } from "../types/domain";
 import { apiClient } from "./client";
 
 export const authApi = {
+  resetPassword: async (token: string, password: string) => {
+    await apiClient.post("/auth/reset-password", { token, password });
+  },
   registration: async () =>
     (await apiClient.get<{ enabled: boolean }>("/auth/registration")).data,
   me: async () => (await apiClient.get<User>("/auth/me")).data,

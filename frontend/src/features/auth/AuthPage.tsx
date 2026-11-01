@@ -120,6 +120,18 @@ export function AuthPage() {
               {mode === "login" ? "Anmelden" : "Konto erstellen"}
             </Button>
           </form>
+          {mode === "login" && (
+            <details className="mt-5 text-sm text-zinc-500">
+              <summary className="focus-ring cursor-pointer text-moss-700">
+                Passwort vergessen?
+              </summary>
+              <p className="mt-2 leading-6">
+                Bitte kontaktiere die Administration und nenne die
+                E-Mail-Adresse deines Kontos. Du erhältst einen persönlichen
+                Link, um ein neues Passwort festzulegen.
+              </p>
+            </details>
+          )}
           {registration.isError && (
             <div role="alert" className="mt-5 text-sm text-red-800">
               <p>
