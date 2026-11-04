@@ -81,27 +81,35 @@ async def validation_error(request: Request, exc: RequestValidationError):
     return await request_validation_exception_handler(request, exc)
 
 
-def require(session, model, identifier):
-    item = session.get(model, str(identifier))
+def owned_query(model, user):
+    if model is Employee:
+        return select(Employee).where(Employee.user_id == user.id)
+    if model is Trip:
+        return select(Trip).join(Employee).where(Employee.user_id == user.id)
+    return (
+        select(model)
+        .join(Trip, model.trip_id == Trip.id)
+        .join(Employee, Trip.employee_id == Employee.id)
+        .where(Employee.user_id == user.id)
+    )
+
+
+def require(session, model, identifier, user, *, lock=False):
+    query = owned_query(model, user).where(model.id == str(identifier))
+    if lock:
+        query = query.with_for_update(of=model)
+    item = session.scalar(query)
     if item is None:
         raise HTTPException(404, "Not found")
     return item
 
 
-def lock_trip(session, trip_id):
-    trip = session.scalar(select(Trip).where(Trip.id == str(trip_id)).with_for_update())
-    if trip is None:
-        raise HTTPException(404, "Trip not found")
-    return trip
+def lock_trip(session, trip_id, user):
+    return require(session, Trip, trip_id, user, lock=True)
 
 
-def lock_employee(session, employee_id):
-    employee = session.scalar(
-        select(Employee).where(Employee.id == str(employee_id)).with_for_update()
-    )
-    if employee is None:
-        raise HTTPException(404, "Employee not found")
-    return employee
+def lock_employee(session, employee_id, user):
+    return require(session, Employee, employee_id, user, lock=True)
 
 
 def delete_trip_data(session, store, trips, employee=None):
@@ -206,17 +214,17 @@ def reset_password(body: PasswordResetInput, session: DB):
 
 
 @protected.post("/employees", response_model=EmployeeOut, status_code=201)
-def create_employee(body: EmployeeCreate, session: DB):
-    employee = Employee(**body.model_dump())
+def create_employee(body: EmployeeCreate, session: DB, user: CurrentUser):
+    employee = Employee(user_id=user.id, **body.model_dump())
     session.add(employee)
     session.commit()
     return employee
 
 
 @protected.get("/employees", response_model=list[EmployeeOut])
-def list_employees(session: DB, limit: Limit = 100, offset: Offset = 0):
+def list_employees(session: DB, user: CurrentUser, limit: Limit = 100, offset: Offset = 0):
     return session.scalars(
-        select(Employee)
+        owned_query(Employee, user)
         .order_by(func.lower(Employee.name), Employee.id)
         .offset(offset)
         .limit(limit)
@@ -224,13 +232,13 @@ def list_employees(session: DB, limit: Limit = 100, offset: Offset = 0):
 
 
 @protected.get("/employees/{employee_id}", response_model=EmployeeOut)
-def get_employee(employee_id: UUID, session: DB):
-    return require(session, Employee, employee_id)
+def get_employee(employee_id: UUID, session: DB, user: CurrentUser):
+    return require(session, Employee, employee_id, user)
 
 
 @protected.delete("/employees/{employee_id}", status_code=204)
-def delete_employee(employee_id: UUID, session: DB, store: Store):
-    employee = lock_employee(session, employee_id)
+def delete_employee(employee_id: UUID, session: DB, store: Store, user: CurrentUser):
+    employee = lock_employee(session, employee_id, user)
     trips = session.scalars(
         select(Trip).where(Trip.employee_id == str(employee_id)).order_by(Trip.id).with_for_update()
     ).all()
@@ -238,8 +246,8 @@ def delete_employee(employee_id: UUID, session: DB, store: Store):
 
 
 @protected.post("/employees/{employee_id}/trips", response_model=TripOut, status_code=201)
-def create_trip(employee_id: UUID, body: TripCreate, session: DB):
-    lock_employee(session, employee_id)
+def create_trip(employee_id: UUID, body: TripCreate, session: DB, user: CurrentUser):
+    lock_employee(session, employee_id, user)
     trip = Trip(employee_id=str(employee_id), **body.model_dump())
     session.add(trip)
     session.commit()
@@ -247,8 +255,10 @@ def create_trip(employee_id: UUID, body: TripCreate, session: DB):
 
 
 @protected.get("/employees/{employee_id}/trips", response_model=list[TripOut])
-def list_trips(employee_id: UUID, session: DB, limit: Limit = 100, offset: Offset = 0):
-    require(session, Employee, employee_id)
+def list_trips(
+    employee_id: UUID, session: DB, user: CurrentUser, limit: Limit = 100, offset: Offset = 0
+):
+    require(session, Employee, employee_id, user)
     return session.scalars(
         select(Trip)
         .where(Trip.employee_id == str(employee_id))
@@ -259,8 +269,8 @@ def list_trips(employee_id: UUID, session: DB, limit: Limit = 100, offset: Offse
 
 
 @protected.put("/trips/{trip_id}", response_model=TripOut)
-def update_trip(trip_id: UUID, body: TripCreate, session: DB):
-    trip = lock_trip(session, trip_id)
+def update_trip(trip_id: UUID, body: TripCreate, session: DB, user: CurrentUser):
+    trip = lock_trip(session, trip_id, user)
     for field, value in body.model_dump().items():
         setattr(trip, field, value)
     session.commit()
@@ -268,19 +278,21 @@ def update_trip(trip_id: UUID, body: TripCreate, session: DB):
 
 
 @protected.delete("/trips/{trip_id}", status_code=204)
-def delete_trip(trip_id: UUID, session: DB, store: Store):
-    trip = lock_trip(session, trip_id)
+def delete_trip(trip_id: UUID, session: DB, store: Store, user: CurrentUser):
+    trip = lock_trip(session, trip_id, user)
     return delete_trip_data(session, store, [trip])
 
 
 @protected.get("/trips/{trip_id}", response_model=TripOut)
-def get_trip(trip_id: UUID, session: DB):
-    return require(session, Trip, trip_id)
+def get_trip(trip_id: UUID, session: DB, user: CurrentUser):
+    return require(session, Trip, trip_id, user)
 
 
 @protected.get("/trips/{trip_id}/documents", response_model=list[DocumentOut])
-def list_documents(trip_id: UUID, session: DB, limit: Limit = 100, offset: Offset = 0):
-    require(session, Trip, trip_id)
+def list_documents(
+    trip_id: UUID, session: DB, user: CurrentUser, limit: Limit = 100, offset: Offset = 0
+):
+    require(session, Trip, trip_id, user)
     return session.scalars(
         select(Document)
         .where(Document.trip_id == str(trip_id))
@@ -291,9 +303,11 @@ def list_documents(trip_id: UUID, session: DB, limit: Limit = 100, offset: Offse
 
 
 @protected.post("/trips/{trip_id}/documents", response_model=DocumentOut, status_code=201)
-def upload_document(trip_id: UUID, session: DB, store: Store, file: Annotated[UploadFile, File()]):
+def upload_document(
+    trip_id: UUID, session: DB, store: Store, file: Annotated[UploadFile, File()], user: CurrentUser
+):
     settings = get_settings()
-    require(session, Trip, trip_id)
+    require(session, Trip, trip_id, user)
     filename = (file.filename or "document.pdf").replace("\\", "/").rsplit("/", 1)[-1][:255]
     data = file.file.read(settings.max_upload_bytes + 1)
     file.file.close()
@@ -303,7 +317,7 @@ def upload_document(trip_id: UUID, session: DB, store: Store, file: Annotated[Up
         pages = extract_pages(data, settings)
     except ValueError as exc:
         raise HTTPException(422, {"filename": filename, "message": str(exc)}) from exc
-    lock_trip(session, trip_id)
+    lock_trip(session, trip_id, user)
     digest = hashlib.sha256(data).hexdigest()
     existing = session.scalar(
         select(Document).where(Document.trip_id == str(trip_id), Document.sha256 == digest)
@@ -342,9 +356,9 @@ def upload_document(trip_id: UUID, session: DB, store: Store, file: Annotated[Up
 
 
 @protected.delete("/documents/{document_id}", status_code=204)
-def delete_document(document_id: UUID, session: DB, store: Store):
-    document = require(session, Document, document_id)
-    lock_trip(session, document.trip_id)
+def delete_document(document_id: UUID, session: DB, store: Store, user: CurrentUser):
+    document = require(session, Document, document_id, user)
+    lock_trip(session, document.trip_id, user)
     document = session.scalar(select(Document).where(Document.id == str(document_id)))
     if document is None:
         raise HTTPException(404, "Document not found")
@@ -378,8 +392,10 @@ def delete_document(document_id: UUID, session: DB, store: Store):
 
 
 @protected.get("/documents/{document_id}/download")
-def download_document(document_id: UUID, session: DB, store: Store, inline: bool = False):
-    document = require(session, Document, document_id)
+def download_document(
+    document_id: UUID, session: DB, store: Store, user: CurrentUser, inline: bool = False
+):
+    document = require(session, Document, document_id, user)
     try:
         data = store.read(document.object_key)
     except (BotoCoreError, ClientError, StorageError) as exc:
@@ -396,8 +412,8 @@ def download_document(document_id: UUID, session: DB, store: Store, inline: bool
 
 
 @protected.post("/trips/{trip_id}/summaries", response_model=JobOut, status_code=202)
-def generate_summary(trip_id: UUID, session: DB, force: bool = False):
-    lock_trip(session, trip_id)
+def generate_summary(trip_id: UUID, session: DB, user: CurrentUser, force: bool = False):
+    lock_trip(session, trip_id, user)
     active = session.scalar(
         select(SummaryJob).where(
             SummaryJob.trip_id == str(trip_id), SummaryJob.status.in_(["queued", "running"])
@@ -443,8 +459,10 @@ def generate_summary(trip_id: UUID, session: DB, force: bool = False):
 
 
 @protected.get("/trips/{trip_id}/summaries", response_model=list[JobOut])
-def list_summaries(trip_id: UUID, session: DB, limit: Limit = 100, offset: Offset = 0):
-    require(session, Trip, trip_id)
+def list_summaries(
+    trip_id: UUID, session: DB, user: CurrentUser, limit: Limit = 100, offset: Offset = 0
+):
+    require(session, Trip, trip_id, user)
     return session.scalars(
         select(SummaryJob)
         .where(SummaryJob.trip_id == str(trip_id))
@@ -455,12 +473,12 @@ def list_summaries(trip_id: UUID, session: DB, limit: Limit = 100, offset: Offse
 
 
 @protected.get("/summary-jobs/{job_id}", response_model=JobOut)
-def get_job(job_id: UUID, session: DB):
-    return require(session, SummaryJob, job_id)
+def get_job(job_id: UUID, session: DB, user: CurrentUser):
+    return require(session, SummaryJob, job_id, user)
 
 
-def result_for_job(job_id, session):
-    job = require(session, SummaryJob, job_id)
+def result_for_job(job_id, session, user):
+    job = require(session, SummaryJob, job_id, user)
     if job.result is None:
         raise HTTPException(409, {"status": job.status, "error": job.error})
     current_ids = set(session.scalars(select(Document.id).where(Document.trip_id == job.trip_id)))
@@ -503,8 +521,8 @@ def result_for_job(job_id, session):
 
 
 @protected.get("/summary-jobs/{job_id}/result", response_model=SummaryResult)
-def get_result(job_id: UUID, session: DB):
-    return result_for_job(job_id, session)
+def get_result(job_id: UUID, session: DB, user: CurrentUser):
+    return result_for_job(job_id, session, user)
 
 
 @protected.put(
@@ -513,9 +531,7 @@ def get_result(job_id: UUID, session: DB):
 def review_document(
     job_id: UUID, document_id: UUID, body: ReviewInput, session: DB, user: CurrentUser
 ):
-    job = session.scalar(select(SummaryJob).where(SummaryJob.id == str(job_id)).with_for_update())
-    if job is None:
-        raise HTTPException(404, "Auswertung nicht gefunden.")
+    job = require(session, SummaryJob, job_id, user, lock=True)
     if job.status in {"queued", "running"} or job.result is None:
         raise HTTPException(409, "Die Auswertung ist noch nicht abgeschlossen.")
     result = deepcopy(job.result)
@@ -561,7 +577,7 @@ def review_document(
         user.id,
         body.decision,
     )
-    return result_for_job(job_id, session)
+    return result_for_job(job_id, session, user)
 
 
 @protected.put(
@@ -570,9 +586,7 @@ def review_document(
 def correct_document(
     job_id: UUID, document_id: UUID, body: CorrectionInput, session: DB, user: CurrentUser
 ):
-    job = session.scalar(select(SummaryJob).where(SummaryJob.id == str(job_id)).with_for_update())
-    if job is None:
-        raise HTTPException(404, "Auswertung nicht gefunden.")
+    job = require(session, SummaryJob, job_id, user, lock=True)
     if job.status in {"queued", "running"} or job.result is None:
         raise HTTPException(409, "Die Auswertung ist noch nicht abgeschlossen.")
     result = deepcopy(job.result)
@@ -600,14 +614,12 @@ def correct_document(
     logger.info(
         "document_corrected job_id=%s document_id=%s user_id=%s", job.id, document_id, user.id
     )
-    return result_for_job(job_id, session)
+    return result_for_job(job_id, session, user)
 
 
 @protected.put("/summary-jobs/{job_id}/relationships", response_model=SummaryResult)
 def resolve_relationship(job_id: UUID, body: RelationshipInput, session: DB, user: CurrentUser):
-    job = session.scalar(select(SummaryJob).where(SummaryJob.id == str(job_id)).with_for_update())
-    if job is None:
-        raise HTTPException(404, "Auswertung nicht gefunden.")
+    job = require(session, SummaryJob, job_id, user, lock=True)
     if job.status in {"queued", "running"} or job.result is None:
         raise HTTPException(409, "Die Auswertung ist noch nicht abgeschlossen.")
     ids = [str(i) for i in body.document_ids]
@@ -661,7 +673,7 @@ def resolve_relationship(job_id: UUID, body: RelationshipInput, session: DB, use
     if job.result["coverage"]["failed"] == job.result["coverage"]["supplied"]:
         job.status = "failed"
     session.commit()
-    return result_for_job(job_id, session)
+    return result_for_job(job_id, session, user)
 
 
 app.include_router(protected)

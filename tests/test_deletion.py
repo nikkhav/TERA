@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from tera.api import app
 from tera.auth import get_current_user
 from tera.db import get_session
-from tera.models import Base, Document, Employee, SummaryJob, Trip
+from tera.models import Base, Document, Employee, SummaryJob, Trip, User
 from tera.storage import StorageError, get_store
 
 
@@ -49,10 +49,13 @@ class DeletionTests(unittest.TestCase):
 
         app.dependency_overrides[get_session] = session_dependency
         app.dependency_overrides[get_store] = lambda: self.store
-        app.dependency_overrides[get_current_user] = lambda: object()
         self.client = TestClient(app)
         with Session(self.engine) as session:
-            employee = Employee(name="Test Person")
+            user = User(email="owner@example.org", display_name="Owner", password_hash="unused")
+            session.add(user)
+            session.flush()
+            self.user_id = user.id
+            employee = Employee(name="Test Person", user_id=user.id)
             session.add(employee)
             session.flush()
             self.employee_id = employee.id
@@ -74,6 +77,7 @@ class DeletionTests(unittest.TestCase):
                 ))
                 self.store.put(document.object_key, b"pdf")
             session.commit()
+        app.dependency_overrides[get_current_user] = lambda: User(id=self.user_id)
 
     def tearDown(self):
         self.client.close()
@@ -120,7 +124,7 @@ class DeletionTests(unittest.TestCase):
     def test_missing_employee_and_empty_employee(self):
         self.assertEqual(self.client.delete(f"/employees/{uuid4()}").status_code, 404)
         with Session(self.engine) as session:
-            employee = Employee(name="Empty")
+            employee = Employee(name="Empty", user_id=self.user_id)
             session.add(employee)
             session.commit()
             employee_id = employee.id

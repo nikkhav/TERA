@@ -69,6 +69,45 @@ docker compose -f compose.yaml -f compose.host-ollama.yaml up --build -d
 
 `docker compose stop` preserves data. **`docker compose down -v` deletes stored data and model files.**
 
+## Password recovery for administrators
+
+An administrator with access to the server creates a recovery link. The user then
+chooses a new password in the browser. Email delivery is handled manually.
+
+1. Open a terminal on the server and go to the TERA project directory.
+2. Use the account's registered email and the address where users open TERA:
+
+   ```bash
+   docker compose exec api python -m tera.password_reset person@example.org --base-url https://tera.example.org
+   ```
+
+   Replace `person@example.org` and `https://tera.example.org` with the actual values.
+   For local Docker testing, use `--base-url http://localhost:3000`.
+   With host Ollama, use the same Compose files as at startup:
+
+   ```bash
+   docker compose -f compose.yaml -f compose.host-ollama.yaml exec api python -m tera.password_reset person@example.org --base-url http://localhost:3000
+   ```
+
+3. Copy the complete printed link and privately give it to the verified account owner.
+   Anyone who has this link can set a new password for that account.
+4. The user opens the link, enters and confirms a new password of 12–128 characters,
+   then signs in with their email and new password.
+
+The link works once and expires after 30 minutes. Add `--expires-minutes 60` to allow
+one hour. To replace an expired or lost link, run the command again. Each new link
+invalidates the previous link for that account. Existing sessions are revoked when
+the user successfully sets the new password.
+
+If the command reports `Active user not found.`, check the registered email and
+whether the account is active. If a link is invalid or expired, create a new one.
+The login page's **Passwort vergessen?** message directs users to the administrator.
+
+The Docker command issues the link. The browser submits the token and new password
+to `POST /auth/reset-password`. Successful redemption returns HTTP 204. Issuing links
+requires server access through the command above. See
+[operations](docs/operations.md#password-recovery-without-email) for local development details.
+
 ## How it works
 
 PDF → text rows with source locations → bounded model requests → document-level evidence and arithmetic checks → compact report.

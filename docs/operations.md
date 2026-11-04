@@ -20,7 +20,7 @@ The example environment files list available settings. The most useful are:
 
 Finish active jobs before changing the model. For Docker, update `.env`, run `docker compose run --rm model-init`, then `docker compose up -d --force-recreate api worker`. Host Ollama users install models directly instead. For Linux NVIDIA GPU support use `compose.gpu.yaml` alongside `compose.yaml`.
 
-Before a production deployment, set `APP_ENVIRONMENT=production` and a unique signing secret of at least 32 bytes. All accounts share one employee/trip workspace. Separate organizations and roles are not implemented.
+Before a production deployment, set `APP_ENVIRONMENT=production` and a unique signing secret of at least 32 bytes. Each account has its own employees, trips, documents and reports. Access to these resources is checked by the API using the employee owner. Organization sharing and roles are not implemented.
 
 ## Password recovery without email
 
@@ -31,6 +31,7 @@ application accounts have no password-reset administration permissions.
 After deploying this change, apply the included migration before starting the new API:
 
 ```bash
+docker compose stop api worker
 docker compose build
 docker compose run --rm init
 docker compose up -d
