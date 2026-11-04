@@ -44,7 +44,8 @@ export function ReviewDialog({
   onCompare: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [editing, setEditing] = useState(initiallyEditing);
+  const isRejected = document.review_history?.at(-1)?.decision === "rejected";
+  const [editing, setEditing] = useState(initiallyEditing && !isRejected);
   const [comment, setComment] = useState("");
   const expenses = summary.expenses.filter(
     (expense) => expense.document_id === document.document_id,
@@ -98,7 +99,7 @@ export function ReviewDialog({
     >
       <div>
         <div className="min-w-0">
-          {editing ? (
+          {editing && !isRejected ? (
             <div className="space-y-4">
               <PdfLink
                 documentId={document.document_id}
@@ -113,7 +114,11 @@ export function ReviewDialog({
           ) : (
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="secondary" onClick={() => setEditing(true)}>
+                <Button
+                  variant="secondary"
+                  disabled={isRejected}
+                  onClick={() => setEditing(true)}
+                >
                   <Pencil size={16} />
                   Bearbeiten
                 </Button>
@@ -358,7 +363,7 @@ export function ReviewDialog({
                 Abgelehnte Beträge werden nicht in die bestätigte Summe
                 aufgenommen.
               </p>
-              {!canApprove && (
+              {!canApprove && !isRejected && (
                 <p className="text-sm text-amber-800">
                   Unvollständige Auswertung: fehlende Angaben über „Bearbeiten“
                   ergänzen.
@@ -371,14 +376,14 @@ export function ReviewDialog({
               )}
               <div className="sticky bottom-0 flex flex-wrap gap-2 border-t border-line bg-white py-4">
                 <Button
-                  disabled={review.isPending || !canApprove}
+                  disabled={review.isPending || isRejected || !canApprove}
                   onClick={() => review.mutate("approved")}
                 >
                   Geprüft und bestätigt
                 </Button>
                 <Button
                   variant="secondary"
-                  disabled={review.isPending}
+                  disabled={review.isPending || isRejected}
                   onClick={() => review.mutate("rejected")}
                 >
                   Ablehnen

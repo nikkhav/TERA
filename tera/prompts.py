@@ -44,7 +44,10 @@ Descriptions are short German expense labels. Preserve original merchant names.
 Merchant is the issuing company/platform, never the customer, passenger or driver.
 On Uber ride receipts, use Uber when the text identifies Uber/UberX; do not use the driver's name.
 Separate information from potential problems by meaning, regardless of expense category.
-notices: useful factual context or ordinary document conditions; no error is alleged.
+notices: only neutral facts that help verify or interpret the claimed expense, such as a
+refund, payment adjustment or documented fare inclusion not already captured in structured fields.
+Omit travel logistics and routine passenger instructions (gates, seats, terminals, boarding,
+check-in and ID requirements), generic fare conditions and courtesy text. If none apply, notices=[].
 notes: a specific unresolved discrepancy, unreliable reading or potential document problem
 requiring a person's attention. State WHAT may be wrong and WHAT to compare or clarify.
 An ordinary printed fact is not a problem merely because it may be useful to the reviewer.
@@ -52,6 +55,7 @@ Do not put a description in notes without identifying an actual uncertainty or c
 If no potential problem is identified, notes=[]. Both lists must be concise German.
 flight_number holds the printed transport connection number, if any.
 transport_mode is a concise German name supported by the document; null if unknown.
+For generic public transit use "Öffentlicher Verkehr"; never return machine identifiers.
 Do not repeat document type, extraction steps, missing itemization, technical feedback,
 missing optional fields or reasoning. Do not repeat structured facts in notices.
 Explicit sample/draft/invalid status is a potential document problem and belongs in notes.

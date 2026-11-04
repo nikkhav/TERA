@@ -15,6 +15,7 @@ from tera.processing import process_document
 from tera.prompts import PROMPT_VERSION
 from tera.reporting import make_report
 from tera.storage import LocalObjectStore, ObjectStore
+from tera.token_usage import token_counts
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,8 @@ def settings_for_job(settings, job):
 
 def process_job(factory, settings, job_id, token, extractor=None, store=None):
     started = time.monotonic()
+    counts: list[int | None] = []
+    usage_context = token_counts.set(counts)
     try:
         with factory() as session:
             job = session.get(SummaryJob, job_id)
@@ -121,7 +124,12 @@ def process_job(factory, settings, job_id, token, extractor=None, store=None):
             records.append(record)
             progress(completed=1 if isinstance(extractor, OllamaExtractor) else 0)
             update_job(factory, settings, job_id, token, completed_documents=len(records))
-        report = make_report(records, model, prompt_version)
+        tokens_used = (
+            None
+            if None in counts or not isinstance(extractor, OllamaExtractor)
+            else sum(count for count in counts if count is not None)
+        )
+        report = make_report(records, model, prompt_version, tokens_used=tokens_used)
         status = "needs_review" if report["coverage"]["needs_review"] else "completed"
         if report["coverage"]["failed"] == report["coverage"]["supplied"]:
             status = "failed"
@@ -167,6 +175,8 @@ def process_job(factory, settings, job_id, token, extractor=None, store=None):
             )
         except LostLease:
             pass
+    finally:
+        token_counts.reset(usage_context)
 
 
 def main():

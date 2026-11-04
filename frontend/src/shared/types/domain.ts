@@ -181,6 +181,7 @@ export type DocumentResult = {
 };
 
 export type Summary = {
+  tokens_used?: number | null;
   schema_version: number;
   job_id: string;
   trip_id: string;

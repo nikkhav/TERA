@@ -7,6 +7,7 @@ import re
 import httpx
 
 from tera.prompts import LOCALIZE_PROMPT
+from tera.token_usage import record_token_usage
 
 logger = logging.getLogger(__name__)
 FOREIGN_SCRIPT = re.compile(r"[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]")
@@ -71,6 +72,7 @@ def translate_texts(texts, settings, notice_indexes=(), protect_numbers=True):
         response = client.post(settings.ollama_url.rstrip("/") + "/api/generate", json=payload)
         response.raise_for_status()
         data = response.json()
+        record_token_usage(data)
     if not data.get("done") or data.get("done_reason") == "length":
         raise ValueError("Incomplete translation")
     values = json.loads(data["response"])["texts"]

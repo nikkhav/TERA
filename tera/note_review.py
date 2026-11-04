@@ -9,6 +9,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from tera.prompts import NOTE_REVIEW_PROMPT
+from tera.token_usage import record_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,7 @@ def review_notes(notes, settings):
         response = client.post(settings.ollama_url.rstrip("/") + "/api/generate", json=payload)
         response.raise_for_status()
         data = response.json()
+        record_token_usage(data)
     if not data.get("done") or data.get("done_reason") == "length":
         raise ValueError("Incomplete note review")
     decisions = NoteDecisions.model_validate_json(data["response"]).decisions

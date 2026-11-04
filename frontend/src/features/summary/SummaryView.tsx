@@ -268,6 +268,11 @@ export function SummaryView({ summary }: { summary: Summary }) {
           )}
         </div>
       )}
+      {summary.tokens_used != null && (
+        <p className="mt-4 text-right text-xs text-zinc-500">
+          Tokenverbrauch gesamt: {summary.tokens_used.toLocaleString("de-DE")}
+        </p>
+      )}
     </section>
   );
 }

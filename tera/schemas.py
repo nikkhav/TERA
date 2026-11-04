@@ -208,12 +208,12 @@ class ReceiptFacts(BaseModel):
     notes: list[str] = Field(
         default_factory=list,
         max_length=50,
-        description="Potential problems only: identify the unresolved discrepancy or uncertain reading and what to check. Ordinary factual context belongs in notices. Empty when no problem is identified.",
+        description="Potential problems only: identify the unresolved discrepancy or uncertain reading and what to check. Expense-relevant factual context belongs in notices. Empty when no problem is identified.",
     )
     notices: list[str] = Field(
         default_factory=list,
         max_length=50,
-        description="Neutral useful information or ordinary document conditions. These do not request review. Potential errors or unreliable readings belong in notes.",
+        description="Neutral facts relevant to expense verification only. Omit routine travel logistics and passenger instructions. Potential errors or unreliable readings belong in notes.",
     )
     evidence: list[Evidence] = Field(default_factory=list, max_length=50)
 
@@ -349,6 +349,7 @@ class SummaryResult(BaseModel):
     language: str
     model: str
     prompt_version: str
+    tokens_used: int | None = None
     coverage: Coverage
     documents: list[DocumentResult]
     expenses: list[Expense]

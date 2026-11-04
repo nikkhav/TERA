@@ -487,7 +487,12 @@ def result_for_job(job_id, session):
                 {"document_id": document.id, **e.model_dump()} for e in facts.evidence
             )
         result = {**result, "documents": records}
-    result = make_report(result["documents"], result["model"], result["prompt_version"])
+    result = make_report(
+        result["documents"],
+        result["model"],
+        result["prompt_version"],
+        tokens_used=result.get("tokens_used"),
+    )
     return {
         "job_id": job.id,
         "trip_id": job.trip_id,
@@ -517,6 +522,11 @@ def review_document(
     record = next((r for r in result["documents"] if r["document_id"] == str(document_id)), None)
     if record is None:
         raise HTTPException(404, "Beleg gehört nicht zu dieser Auswertung.")
+    last_decision = (record.get("review_history") or [{}])[-1].get("decision")
+    if last_decision == "rejected" and body.decision != "pending":
+        raise HTTPException(
+            409, "Der Beleg wurde bereits abgelehnt. Bitte die Prüfung zurücksetzen."
+        )
     if body.decision == "approved":
         expenses = [e for e in result["expenses"] if e["document_id"] == str(document_id)]
         if (
@@ -534,7 +544,12 @@ def review_document(
             "reviewed_at": now().isoformat(),
         }
     )
-    job.result = make_report(result["documents"], result["model"], result["prompt_version"])
+    job.result = make_report(
+        result["documents"],
+        result["model"],
+        result["prompt_version"],
+        tokens_used=result.get("tokens_used"),
+    )
     job.status = "needs_review" if job.result["coverage"]["needs_review"] else "completed"
     if job.result["coverage"]["failed"] == job.result["coverage"]["supplied"]:
         job.status = "failed"
@@ -565,6 +580,11 @@ def correct_document(
     index = next((i for i, r in enumerate(records) if r["document_id"] == str(document_id)), None)
     if index is None:
         raise HTTPException(404, "Beleg gehört nicht zu dieser Auswertung.")
+    last_decision = (records[index].get("review_history") or [{}])[-1].get("decision")
+    if last_decision == "rejected":
+        raise HTTPException(
+            409, "Der Beleg wurde bereits abgelehnt. Bitte die Prüfung zurücksetzen."
+        )
     try:
         records[index] = corrected_record(
             records[index], body.facts, user.id, user.display_name, now().isoformat(), body.comment
@@ -572,7 +592,9 @@ def correct_document(
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     attach_rate(records[index])
-    job.result = make_report(records, result["model"], result["prompt_version"])
+    job.result = make_report(
+        records, result["model"], result["prompt_version"], tokens_used=result.get("tokens_used")
+    )
     job.status = "needs_review" if job.result["coverage"]["needs_review"] else "completed"
     session.commit()
     logger.info(
@@ -629,7 +651,12 @@ def resolve_relationship(job_id: UUID, body: RelationshipInput, session: DB, use
             if original is not None:
                 refresh_saved_date_source(record, original.pages)
         record.setdefault("relationship_history", []).append(event)
-    job.result = make_report(result["documents"], result["model"], result["prompt_version"])
+    job.result = make_report(
+        result["documents"],
+        result["model"],
+        result["prompt_version"],
+        tokens_used=result.get("tokens_used"),
+    )
     job.status = "needs_review" if job.result["coverage"]["needs_review"] else "completed"
     if job.result["coverage"]["failed"] == job.result["coverage"]["supplied"]:
         job.status = "failed"

@@ -10,6 +10,7 @@ from tera.labels import FIELD_LABELS
 from tera.note_review import review_model_notes
 from tera.prompts import build_prompt
 from tera.schemas import Evidence, ReceiptFacts
+from tera.token_usage import record_token_usage
 from tera.transport import attach_flight_route
 
 logger = logging.getLogger(__name__)
@@ -230,6 +231,7 @@ class OllamaExtractor:
                 )
                 response.raise_for_status()
                 result = response.json()
+                record_token_usage(result)
         except Exception:
             logger.exception(
                 "llm_request_failed document_id=%s pages=%s correction=%s duration_seconds=%.2f",

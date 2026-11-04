@@ -30,6 +30,18 @@ TICKET_FARE = re.compile(
     r"\d{1,2}\.\d{1,2}\.\d{4}\.)?"
 )
 
+FLIGHT_LOGISTICS = re.compile(
+    r"\b(?:gates?|flugsteig\w*|boarding|einsteigezeit\w*|sitzplatz\w*|seat(?: assignment)?|"
+    r"terminals?|check-in|lichtbildausweis\w*|photo id)\b",
+    re.IGNORECASE,
+)
+EXPENSE_CONTEXT = re.compile(
+    r"\b(?:gebühr\w*|kosten\w*|preis\w*|betrag\w*|zahl\w*|erstatt\w*|storn\w*|"
+    r"umbuch\w*|beleg\w*|rechnung\w*|fee\w*|charg\w*|cost\w*|refund\w*|"
+    r"payment\w*|cancel\w*|eur|usd|aud|cny)\b|[€$£]",
+    re.IGNORECASE,
+)
+
 
 def informational_note(text):
     text = " ".join(text.split())
@@ -201,9 +213,14 @@ def mark_duplicates(records):
                 )
 
 
-def make_report(records, model, prompt_version):
+def make_report(records, model, prompt_version, *, tokens_used: int | None = None):
     records = deepcopy(records)
     for record in records:
+        facts = record["facts"]
+        if re.fullmatch(
+            r"public[ _-]+transit", (facts.get("transport_mode") or "").strip(), re.IGNORECASE
+        ):
+            facts["transport_mode"] = "Öffentlicher Verkehr"
         role_issue = document_role_issue(
             record["facts"].get("document_kind"),
             record["facts"].get("total"),
@@ -219,7 +236,14 @@ def make_report(records, model, prompt_version):
         moved = [w for w in record["warnings"] if informational_note(w)]
         discarded = set(moved + [w for w in record["warnings"] if not re.search(r"[^\W_]", w)])
         record["warnings"] = [w for w in record["warnings"] if w not in discarded]
-        record["notices"] = list(dict.fromkeys(record.get("notices", []) + moved))
+        notices = dict.fromkeys(record.get("notices", []) + moved)
+        record["notices"] = [
+            notice
+            for notice in notices
+            if facts.get("category") != Category.FLIGHTS
+            or not FLIGHT_LOGISTICS.search(notice)
+            or EXPENSE_CONTEXT.search(notice)
+        ]
         record["validation_issues"] = [
             issue
             for issue in record.get("validation_issues", [])
@@ -434,6 +458,7 @@ def make_report(records, model, prompt_version):
         "language": "de",
         "model": model,
         "prompt_version": prompt_version,
+        "tokens_used": tokens_used,
         "coverage": {
             "supplied": len(records),
             "processed": len(records) - failed,
